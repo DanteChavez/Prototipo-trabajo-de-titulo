@@ -6,7 +6,7 @@ Objetivo: demostrar de extremo a extremo los dos problemas del trabajo
 ## Incluido (en este orden de implementación)
 | Hito | Requisitos | Qué se demuestra |
 |---|---|---|
-| H0 | RF-06, RNF-01, RNF-05 | JupyterHub + KubeSpawner en k3s/kind de un nodo: login → pod efímero → destrucción por inactividad. |
+| H0 | RF-06, RNF-01, RNF-05 | JupyterHub + KubeSpawner en k3s de un nodo: login → pod efímero → destrucción por inactividad. |
 | H1 | RF-07, RNF-02 | Volumen persistente por estudiante con `personal/` y `shipping/`; los archivos sobreviven al pod. |
 | H2 | RF-05, RF-10 (versión mínima) | Secciones, profesores y estudiantes cargados desde un CSV/seed (sin pantallas CRUD completas). |
 | H3 | RF-12, RF-08 | El profesor publica un ejercicio con plazo; el estudiante lo ve y lo copia a `personal/`. |

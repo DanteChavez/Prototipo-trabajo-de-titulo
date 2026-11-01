@@ -15,7 +15,7 @@ de entregas con plazo límite. El detalle está en `docs/PROTOTYPE_SCOPE.md`.
 NO implementar nada fuera de ese alcance aunque el PDF lo describa. Si algo parece faltar, pregunta.
 
 ## Stack (decisiones vigentes, ver docs/adr/)
-- JupyterHub + KubeSpawner sobre Kubernetes de un solo nodo (k3s o kind para desarrollo local).
+- Kubernetes de un solo nodo con k3d (desarrollo) e instalación de JupyterHub con Helm (Zero to JupyterHub).
 - Volúmenes persistentes (PVC) por estudiante: `personal/` y `shipping/`.
 - Servicio académico pequeño (Python + FastAPI + SQLite) para secciones, ejercicios y entregas.
 - Autenticación del prototipo: autenticador simple. Microsoft SSO queda como trabajo futuro (RF-01 parcial).
