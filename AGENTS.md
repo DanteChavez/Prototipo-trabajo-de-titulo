@@ -19,6 +19,7 @@ NO implementar nada fuera de ese alcance aunque el PDF lo describa. Si algo pare
 - Volúmenes persistentes (PVC) por estudiante: `personal/` y `shipping/`.
 - Servicio académico pequeño (Python + FastAPI + SQLite) para secciones, ejercicios y entregas.
 - Autenticación del prototipo: autenticador simple. Microsoft SSO queda como trabajo futuro (RF-01 parcial).
+- Versiones fijadas en ADR 0003, no cambiar sin confirmar
 
 ## Comandos
 Se completan a medida que existan. Si un comando no está aquí, no lo inventes: búscalo o pregunta.
