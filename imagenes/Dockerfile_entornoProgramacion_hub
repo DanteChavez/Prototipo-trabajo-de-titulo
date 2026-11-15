@@ -16,10 +16,19 @@ USER root
 
 ############################
 # JupyterHub
-# El paquete de conda-forge incluye el proxy (configurable-http-proxy) y Node.js.
+# El Hub (jupyterhub-base, solo Python) va en el entorno base, junto a Jupyter Lab y los
+# kernels, porque cada sesión de usuario ejecuta jupyterhub-singleuser desde ahí.
+#
+# El proxy (configurable-http-proxy) necesita Node.js y va en un entorno conda APARTE
+# ("proxy"), solo con paquetes de conda-forge. Si Node.js se instala en el entorno base,
+# carga la librería brotli antigua de ese entorno y falla al arrancar con:
+#   node: symbol lookup error: ... libnode.so: undefined symbol: BrotliEncoderAttachPreparedDictionary
+# La ruta del proxy se fija en config/jupyterhub_config.py.
+#
 # No se ejecuta "conda clean": la imagen base usa una librería dentro de /opt/miniconda3/pkgs.
 #
-RUN conda install -c conda-forge jupyterhub --yes
+RUN conda install -c conda-forge jupyterhub-base --yes
+RUN conda create -n proxy --override-channels -c conda-forge configurable-http-proxy --yes
 
 ############################
 # Configuración por defecto de cada usuario (/etc/skel)

@@ -11,6 +11,15 @@ c = get_config()  # noqa: F821
 # --- Red -------------------------------------------------------------------
 c.JupyterHub.bind_url = "http://0.0.0.0:8000"
 
+# El proxy vive en su propio entorno conda (ver Dockerfile_entornoProgramacion_hub).
+# Se llama con el node de ese entorno porque el script empieza con "#!/usr/bin/env node",
+# que buscaría node en el PATH en vez de usar el del entorno "proxy".
+ENTORNO_PROXY = "/opt/miniconda3/envs/proxy/bin"
+c.ConfigurableHTTPProxy.command = [
+    f"{ENTORNO_PROXY}/node",
+    f"{ENTORNO_PROXY}/configurable-http-proxy",
+]
+
 # --- Autenticación: cuentas Unix del contenedor (PAM) -----------------------
 # Usuario y contraseña se validan contra /etc/passwd y /etc/shadow, que se
 # llenaron al construir la imagen a partir de config/users.txt.
