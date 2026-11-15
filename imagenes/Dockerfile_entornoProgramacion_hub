@@ -1,0 +1,55 @@
+# Dockerfile de JupyterHub con usuarios locales de prueba
+#
+# Parte de la imagen del entorno de programación (Jupyter Lab + kernels de Python,
+# Java y C++) y le agrega JupyterHub. Los usuarios se leen de config/users.txt
+# DURANTE EL BUILD: cada línea se convierte en una cuenta Unix con su /home/<usuario>.
+#
+# Se construye desde la raíz del repositorio (ver README.md):
+#   docker compose build
+
+ARG IMAGEN_ENTORNO=dantechavez0/entorno-programacion:latest
+FROM ${IMAGEN_ENTORNO}
+
+LABEL "description"="JupyterHub con usuarios locales sobre el entorno de programación"
+
+USER root
+
+############################
+# JupyterHub
+# El paquete de conda-forge incluye el proxy (configurable-http-proxy) y Node.js.
+# No se ejecuta "conda clean": la imagen base usa una librería dentro de /opt/miniconda3/pkgs.
+#
+RUN conda install -c conda-forge jupyterhub --yes
+
+############################
+# Configuración por defecto de cada usuario (/etc/skel)
+# En la imagen base, los ajustes de JupyterLab viven en /root y solo sirven a root.
+# Lo que se deja en /etc/skel se copia al home de cada cuenta que se crea.
+#
+RUN mkdir -p /etc/skel/.jupyter/lab /etc/skel/.config && \
+    cp -r /root/.jupyter/lab/user-settings /etc/skel/.jupyter/lab/ && \
+    cp -r /root/.config/Ultralytics /etc/skel/.config/ && \
+    find /etc/skel -name '._*' -delete
+
+# Los kernels y librerías se instalaron como root: se asegura que cualquier usuario pueda leerlos.
+RUN chmod -R a+rX /etc/skel /opt/libs /opt/java_kernel_install /usr/local/share/jupyter
+
+############################
+# Usuarios de prueba (leídos de users.txt al construir)
+#
+COPY config/users.txt config/crear_usuarios.py /etc/jupyterhub/
+RUN python /etc/jupyterhub/crear_usuarios.py /etc/jupyterhub/users.txt && \
+    rm /etc/jupyterhub/users.txt
+
+############################
+# Configuración del Hub
+#
+COPY config/jupyterhub_config.py /etc/jupyterhub/jupyterhub_config.py
+
+# Aquí el Hub guarda su base de datos y su secreto de cookies (volumen en el compose).
+WORKDIR /srv/jupyterhub
+
+EXPOSE 8000
+
+# JupyterHub queda como PID 1 y reemplaza al ENTRYPOINT de Jupyter Lab de la imagen base.
+ENTRYPOINT ["/opt/miniconda3/bin/jupyterhub", "-f", "/etc/jupyterhub/jupyterhub_config.py"]

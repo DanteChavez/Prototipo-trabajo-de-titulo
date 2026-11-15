@@ -1,0 +1,9 @@
+# Usuarios de prueba de JupyterHub.
+# Formato: usuario:contraseña  (una cuenta por línea; las líneas con # se ignoran)
+# El Dockerfile del Hub lee este archivo AL CONSTRUIR la imagen y crea una cuenta Unix por línea.
+# Para agregar usuarios: añadirlos AL FINAL y reconstruir la imagen (ver README).
+alumno01:clave01
+alumno02:clave02
+alumno03:clave03
+alumno04:clave04
+alumno05:clave05
