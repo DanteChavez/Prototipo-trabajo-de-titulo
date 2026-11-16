@@ -63,6 +63,22 @@ def asegurar_home(spawner):
 
 c.Spawner.pre_spawn_hook = asegurar_home
 
+# --- Apariencia (identidad visual de la Universidad de Valparaíso) ----------
+# Plantillas propias en /etc/jupyterhub/personalizacion/templates: heredan de las
+# originales de JupyterHub y cambian colores, textos (en español) y logos.
+import base64
+
+PERSONALIZACION = "/etc/jupyterhub/personalizacion"
+c.JupyterHub.template_paths = [f"{PERSONALIZACION}/templates"]
+c.JupyterHub.logo_file = f"{PERSONALIZACION}/logo_uv_blanco.png"  # logo de la barra superior
+
+# El logo de la página de inicio de sesión se incrusta en el HTML (data URI)
+# para no tener que publicar archivos estáticos adicionales.
+with open(f"{PERSONALIZACION}/logo_informatica_azul.png", "rb") as f:
+    c.JupyterHub.template_vars = {
+        "logo_login": "data:image/png;base64," + base64.b64encode(f.read()).decode(),
+    }
+
 # --- Estado del Hub ---------------------------------------------------------
 # jupyterhub.sqlite y jupyterhub_cookie_secret quedan en el directorio de
 # trabajo (/srv/jupyterhub), que el compose monta como volumen persistente.

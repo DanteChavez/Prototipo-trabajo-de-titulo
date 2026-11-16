@@ -16,6 +16,7 @@ trabaja con su propia cuenta Unix.
 | `config/users.txt` | Usuarios de prueba (`usuario:contraseña`) |
 | `config/crear_usuarios.py` | Crea las cuentas Unix a partir de `users.txt` durante el build |
 | `config/jupyterhub_config.py` | Configuración de JupyterHub |
+| `config/personalizacion/` | Logos y plantillas HTML con la identidad visual de la UV |
 | `docker-compose.yml` | Levanta JupyterHub con sus volúmenes persistentes |
 | `docker-compose.entorno.yml` | Levanta la imagen `latest` sola (Jupyter Lab sin login, etapa anterior) |
 
@@ -51,6 +52,22 @@ docker compose build --build-arg IMAGEN_ENTORNO=entorno-programacion:latest
   `/home/<usuario>` y un usuario no puede leer el directorio de otro.
 - **Persistencia.** `/home` es el volumen `homes_estudiantes`. Los archivos sobreviven
   a `docker compose down` y a la reconstrucción de la imagen.
+
+## Apariencia
+
+Las páginas del Hub (inicio de sesión, inicio y espera mientras arranca el entorno)
+usan la identidad visual de la Universidad de Valparaíso según el *Manual de Normas
+UV 2023*: azul institucional `#003c58`, azul oscuro `#002e38` y turquesa `#06717e`,
+con los logos de la UV y de la Escuela de Ingeniería Informática.
+
+- `config/personalizacion/templates/`: plantillas que heredan de las originales de
+  JupyterHub y solo cambian colores, textos (en español) y logos.
+  `page.html` es la base de todas las páginas (barra superior, colores y pie de página),
+  y `login.html`, `home.html` y `spawn_pending.html` cambian cada página.
+- `config/personalizacion/*.png`: logos recortados desde los originales de la UV.
+- Se activan en `jupyterhub_config.py` (`template_paths`, `logo_file`, `template_vars`).
+
+Esto solo afecta a las páginas de JupyterHub; JupyterLab mantiene su apariencia.
 
 ## Comprobaciones
 

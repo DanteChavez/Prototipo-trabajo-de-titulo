@@ -54,6 +54,8 @@ RUN python /etc/jupyterhub/crear_usuarios.py /etc/jupyterhub/users.txt && \
 # Configuración del Hub
 #
 COPY config/jupyterhub_config.py /etc/jupyterhub/jupyterhub_config.py
+# Plantillas, colores y logos de la UV (página de inicio de sesión y barra superior).
+COPY config/personalizacion /etc/jupyterhub/personalizacion
 
 # Aquí el Hub guarda su base de datos y su secreto de cookies (volumen en el compose).
 WORKDIR /srv/jupyterhub

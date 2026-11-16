@@ -1,0 +1,102 @@
+{#- Página de inicio de sesión en español con la identidad de la UV.
+    Hereda de la original ("templates/login.html") y reemplaza solo el formulario.
+    Los nombres de los campos (username, password, _xsrf) deben mantenerse:
+    JupyterHub los lee al validar el inicio de sesión. -#}
+{% extends "templates/login.html" %}
+
+{% block stylesheet %}
+  {{ super() }}
+  <style>
+    #login-main { height: 75vh; }
+    #login-main form.uv-login {
+      width: 400px;
+      max-width: 92vw;
+      background: #fff;
+      border-top: 6px solid var(--uv-turquesa);
+      border-radius: 6px;
+      box-shadow: 0 6px 24px rgba(0, 46, 56, .15);
+      padding: 2rem 2.2rem 1.8rem;
+    }
+    .uv-login .uv-logo { display: block; width: 260px; max-width: 100%; margin: 0 auto 1.3rem; }
+    .uv-login h1 {
+      color: var(--uv-azul);
+      font-size: 1.5rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: .2rem;
+    }
+    .uv-login .uv-subtitulo {
+      color: #5b6b73;
+      text-align: center;
+      font-size: .95rem;
+      margin-bottom: 1.4rem;
+    }
+    .uv-login label { color: var(--uv-azul); font-weight: 600; margin-top: .6rem; margin-bottom: .25rem; }
+    .uv-login .form-control:focus {
+      border-color: var(--uv-turquesa);
+      box-shadow: 0 0 0 .2rem rgba(6, 113, 126, .25);
+    }
+    .uv-login #login_submit { margin-top: 1.4rem; padding: .55rem; font-weight: 600; }
+    #login-main .uv-login .login_error {
+      color: #b3261e;
+      background: #fdecea;
+      border-radius: 4px;
+      padding: .5rem;
+      font-weight: 600;
+      text-align: center;
+    }
+  </style>
+{% endblock stylesheet %}
+
+{% block login_container %}
+  <form action="{{ authenticator_login_url }}" method="post" role="form" class="uv-login">
+    <img class="uv-logo" src="{{ logo_login }}" alt="Escuela de Ingeniería Informática, Universidad de Valparaíso" />
+    <h1>Entorno de Programación</h1>
+    <p class="uv-subtitulo">Laboratorios de programación</p>
+
+    <p id="insecure-login-warning" class="hidden alert alert-warning">
+      Conexión sin cifrar (HTTP). No uses aquí tu contraseña institucional.
+    </p>
+    {% if login_error %}
+      <p class="login_error">
+        {% if login_error == "Invalid username or password" %}Usuario o contraseña incorrectos{% else %}{{ login_error }}{% endif %}
+      </p>
+    {% endif %}
+
+    <input type="hidden" name="_xsrf" value="{{ xsrf }}" />
+
+    <label for="username_input">Usuario</label>
+    <input id="username_input" type="text" name="username" value="{{ username }}"
+           class="form-control" autocapitalize="off" autocorrect="off"
+           autocomplete="username" autofocus="autofocus" />
+
+    <label for="password_input">Contraseña</label>
+    <div class="input-group">
+      <input id="password_input" type="password" name="password"
+             class="form-control" autocomplete="current-password" />
+      <button type="button" id="toggle_password_visibility" class="input-group-text"
+              aria-controls="password_input" aria-pressed="false" title="Mostrar contraseña">
+        <i class="fa fa-eye" aria-hidden="true"></i>
+      </button>
+    </div>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const boton = document.getElementById("toggle_password_visibility");
+        const clave = document.getElementById("password_input");
+        const icono = boton.querySelector("i");
+        boton.addEventListener("click", function () {
+          const oculta = clave.type === "password";
+          clave.type = oculta ? "text" : "password";
+          icono.className = oculta ? "fa fa-eye-slash" : "fa fa-eye";
+          boton.setAttribute("aria-pressed", oculta ? "true" : "false");
+          boton.setAttribute("title", oculta ? "Ocultar contraseña" : "Mostrar contraseña");
+        });
+      });
+    </script>
+
+    <div class="feedback-container">
+      <input id="login_submit" type="submit" class="btn btn-jupyter form-control" value="Iniciar sesión" />
+      <div class="feedback-widget hidden"><i class="fa fa-spinner"></i></div>
+    </div>
+  </form>
+{% endblock login_container %}

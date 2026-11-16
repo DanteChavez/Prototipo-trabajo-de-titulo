@@ -1,0 +1,116 @@
+{#- Plantilla base de todas las páginas del Hub.
+    Hereda de la original de JupyterHub ("templates/page.html") y solo agrega
+    los colores de la Universidad de Valparaíso (Manual de Normas UV 2023):
+      azul institucional #003c58, azul oscuro #002e38, turquesa #06717e. -#}
+{% extends "templates/page.html" %}
+
+{% block title %}Entorno de Programación · UV{% endblock title %}
+
+{% block stylesheet %}
+  {{ super() }}
+  <style>
+    :root, [data-bs-theme=light] {
+      --uv-azul: #003c58;
+      --uv-azul-oscuro: #002e38;
+      --uv-turquesa: #06717e;
+      /* Swiss 721 (tipografía institucional) es equivalente a Helvetica/Arial */
+      --bs-body-font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --bs-body-bg: #f2f5f7;
+      --bs-link-color-rgb: 6, 113, 126;
+      --bs-primary: #003c58;
+    }
+
+    /* Barra superior en azul institucional, logo UV en blanco */
+    .navbar {
+      background-color: var(--uv-azul) !important;
+      border-bottom: 4px solid var(--uv-turquesa);
+      padding-top: .6rem;
+      padding-bottom: .6rem;
+    }
+    #jupyterhub-logo img.jpy-logo { height: 52px !important; margin-top: 0; }
+    .uv-nombre-sistema {
+      color: #fff;
+      font-size: 1.15rem;
+      font-weight: 600;
+      border-left: 1px solid rgba(255, 255, 255, .5);
+      padding-left: 1rem;
+      margin-left: .2rem;
+      margin-right: 1.5rem;
+      white-space: nowrap;
+    }
+    @media (max-width: 575px) { .uv-nombre-sistema { display: none; } }
+    .navbar, .navbar .nav-link, #login_widget { color: #fff !important; }
+    .navbar .nav-link:hover { color: #cfe3ea !important; }
+    .navbar .btn-outline-contrast { color: #fff; border-color: #fff; }
+    .navbar .btn-outline-contrast:hover { background: #fff; color: var(--uv-azul); }
+    .navbar-toggler { border-color: rgba(255, 255, 255, .6); }
+    .navbar-toggler-icon { filter: invert(1); }
+
+    /* Botones principales de JupyterHub (naranjo) pasan al azul institucional */
+    .btn-jupyter, .btn-primary {
+      --bs-btn-bg: var(--uv-azul);
+      --bs-btn-border-color: var(--uv-azul);
+      --bs-btn-hover-bg: var(--uv-azul-oscuro);
+      --bs-btn-hover-border-color: var(--uv-azul-oscuro);
+      --bs-btn-active-bg: var(--uv-azul-oscuro);
+      --bs-btn-active-color: #fff;
+      --bs-btn-disabled-bg: var(--uv-azul);
+      --bs-btn-disabled-border-color: var(--uv-azul);
+      --bs-btn-disabled-color: #fff;
+    }
+    .progress-bar { background-color: var(--uv-turquesa); }
+
+    /* Pie de página */
+    .uv-pie {
+      text-align: center;
+      color: #5b6b73;
+      font-size: .85rem;
+      padding: 1.5rem 0 2rem;
+    }
+  </style>
+{% endblock stylesheet %}
+
+{% block scripts %}
+  {{ super() }}
+  {# La página institucional se muestra siempre en modo claro: se anula el modo oscuro. #}
+  <script>
+    localStorage.removeItem("jupyterhub-bs-theme");
+    document.documentElement.setAttribute("data-bs-theme", "light");
+  </script>
+{% endblock scripts %}
+
+{# Se quita el botón de modo oscuro. Se deja un botón invisible con el mismo id
+   porque el script de JupyterHub (darkmode.js) lo busca al cargar la página. #}
+{% block theme_toggle %}
+  <button id="dark-theme-toggle" type="button" hidden></button>
+{% endblock theme_toggle %}
+
+{# Logo UV + nombre del sistema en la barra superior #}
+{% block logo %}
+  {{ super() }}
+  <span class="uv-nombre-sistema">Entorno de Programación</span>
+{% endblock logo %}
+
+{# Menú en español; se omite "Token", que los estudiantes no necesitan. #}
+{% block nav_bar_left_items %}
+  <li class="nav-item"><a class="nav-link" href="{{ base_url }}home">Inicio</a></li>
+  {% if "admin-ui" in parsed_scopes %}
+    <li class="nav-item"><a class="nav-link" href="{{ base_url }}admin">Administración</a></li>
+  {% endif %}
+{% endblock nav_bar_left_items %}
+
+{% block login_widget %}
+  <span id="login_widget">
+    {% if user %}
+      <span class="me-2"><i class="fa fa-user" aria-hidden="true"></i> {{ user.name }}</span>
+      <a id="logout" role="button" class="btn btn-sm btn-outline-contrast" href="{{ logout_url }}">
+        <i aria-hidden="true" class="fa fa-sign-out"></i> Cerrar sesión</a>
+    {% endif %}
+  </span>
+{% endblock login_widget %}
+
+{% block footer %}
+  <footer class="uv-pie">
+    Escuela de Ingeniería Informática · Facultad de Ingeniería · Universidad de Valparaíso
+  </footer>
+{% endblock footer %}
