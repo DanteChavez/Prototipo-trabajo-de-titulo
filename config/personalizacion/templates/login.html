@@ -6,43 +6,55 @@
 
 {% block stylesheet %}
   {{ super() }}
+  {# Estilo del formulario tomado del Portal UV (portal.uv.cl): etiquetas en azul,
+     campos blancos con borde gris, ícono de llave en la contraseña y botón "Ingresar". #}
   <style>
+    body { --bs-body-bg: #fff; }
     #login-main { height: 75vh; }
-    #login-main form.uv-login {
-      width: 400px;
-      max-width: 92vw;
-      background: #fff;
-      border-top: 6px solid var(--uv-turquesa);
-      border-radius: 6px;
-      box-shadow: 0 6px 24px rgba(0, 46, 56, .15);
-      padding: 2rem 2.2rem 1.8rem;
-    }
+    #login-main form.uv-login { width: 420px; max-width: 92vw; padding: 1rem 0; }
     .uv-login .uv-logo { display: block; width: 260px; max-width: 100%; margin: 0 auto 1.3rem; }
-    .uv-login h1 {
-      color: var(--uv-azul);
-      font-size: 1.5rem;
-      font-weight: 700;
-      text-align: center;
-      margin-bottom: .2rem;
+    .uv-login h1 { color: var(--uv-azul); font-size: 1.5rem; font-weight: 700; text-align: center; margin-bottom: .2rem; }
+    .uv-login .uv-subtitulo { color: #6c757d; text-align: center; font-size: .95rem; margin-bottom: 1.8rem; }
+
+    .uv-login .uv-campo { margin-bottom: 1.4rem; }
+    .uv-login label { color: var(--uv-azul); font-size: 1.1rem; font-weight: 400; margin-bottom: .5rem; }
+    .uv-login .form-control {
+      color: #495057;
+      background: #fff;
+      border: 1px solid #ced4da;
+      border-radius: 5px;
+      padding: .6rem .75rem;
+      font-size: 1rem;
     }
-    .uv-login .uv-subtitulo {
-      color: #5b6b73;
-      text-align: center;
-      font-size: .95rem;
-      margin-bottom: 1.4rem;
+    .uv-login .form-control:hover { border-color: #adb5bd; }
+    .uv-login .form-control:focus { border-color: var(--uv-azul); box-shadow: 0 0 0 .2rem rgba(0, 60, 88, .2); }
+
+    /* Contraseña: llave a la izquierda y ojo a la derecha, ambos dentro del campo */
+    .uv-login .uv-clave { position: relative; }
+    .uv-login .uv-clave .form-control { padding-left: 2.6rem; padding-right: 2.8rem; }
+    .uv-login .uv-clave .fa-key { position: absolute; left: .9rem; top: 50%; transform: translateY(-50%); color: #495057; }
+    .uv-login #toggle_password_visibility {
+      position: absolute; right: .4rem; top: 50%; transform: translateY(-50%);
+      border: 0; background: none; color: #495057; padding: .3rem .5rem;
     }
-    .uv-login label { color: var(--uv-azul); font-weight: 600; margin-top: .6rem; margin-bottom: .25rem; }
-    .uv-login .form-control:focus {
-      border-color: var(--uv-turquesa);
-      box-shadow: 0 0 0 .2rem rgba(6, 113, 126, .25);
+
+    .uv-login .feedback-container { display: flex; justify-content: flex-end; margin-top: 2rem; }
+    .uv-login #login_submit {
+      width: auto;
+      color: #fff;
+      background: var(--uv-azul);
+      border: 1px solid var(--uv-azul);
+      border-radius: 5px;
+      padding: .55rem 1.1rem;
+      font-size: 1.1rem;
     }
-    .uv-login #login_submit { margin-top: 1.4rem; padding: .55rem; font-weight: 600; }
+    .uv-login #login_submit:hover { background: #001114; border-color: #001114; }
+
     #login-main .uv-login .login_error {
       color: #b3261e;
       background: #fdecea;
-      border-radius: 4px;
+      border-radius: 5px;
       padding: .5rem;
-      font-weight: 600;
       text-align: center;
     }
   </style>
@@ -65,19 +77,24 @@
 
     <input type="hidden" name="_xsrf" value="{{ xsrf }}" />
 
-    <label for="username_input">Usuario</label>
-    <input id="username_input" type="text" name="username" value="{{ username }}"
-           class="form-control" autocapitalize="off" autocorrect="off"
-           autocomplete="username" autofocus="autofocus" />
+    <div class="uv-campo">
+      <label for="username_input">Usuario</label>
+      <input id="username_input" type="text" name="username" value="{{ username }}"
+             class="form-control" autocapitalize="off" autocorrect="off"
+             autocomplete="username" autofocus="autofocus" />
+    </div>
 
-    <label for="password_input">Contraseña</label>
-    <div class="input-group">
-      <input id="password_input" type="password" name="password"
-             class="form-control" autocomplete="current-password" />
-      <button type="button" id="toggle_password_visibility" class="input-group-text"
-              aria-controls="password_input" aria-pressed="false" title="Mostrar contraseña">
-        <i class="fa fa-eye" aria-hidden="true"></i>
-      </button>
+    <div class="uv-campo">
+      <label for="password_input">Contraseña</label>
+      <div class="uv-clave">
+        <i class="fa fa-key" aria-hidden="true"></i>
+        <input id="password_input" type="password" name="password"
+               class="form-control" autocomplete="current-password" />
+        <button type="button" id="toggle_password_visibility"
+                aria-controls="password_input" aria-pressed="false" title="Mostrar contraseña">
+          <i class="fa fa-eye" aria-hidden="true"></i>
+        </button>
+      </div>
     </div>
     <script>
       document.addEventListener("DOMContentLoaded", function () {
@@ -95,7 +112,9 @@
     </script>
 
     <div class="feedback-container">
-      <input id="login_submit" type="submit" class="btn btn-jupyter form-control" value="Iniciar sesión" />
+      <button id="login_submit" type="submit">
+        <i class="fa fa-right-to-bracket" aria-hidden="true"></i> Ingresar
+      </button>
       <div class="feedback-widget hidden"><i class="fa fa-spinner"></i></div>
     </div>
   </form>

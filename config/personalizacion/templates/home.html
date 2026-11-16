@@ -24,13 +24,10 @@
 {% block stylesheet %}
   {{ super() }}
   <style>
+    body { --bs-body-bg: #fff; }
     .uv-tarjeta {
       max-width: 560px;
       margin: 2rem auto 0;
-      background: #fff;
-      border-top: 6px solid var(--uv-turquesa);
-      border-radius: 6px;
-      box-shadow: 0 6px 24px rgba(0, 46, 56, .15);
       padding: 2rem;
     }
     .uv-tarjeta h1 { color: var(--uv-azul); font-size: 1.6rem; font-weight: 700; }
