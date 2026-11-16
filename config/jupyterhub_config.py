@@ -70,14 +70,25 @@ import base64
 
 PERSONALIZACION = "/etc/jupyterhub/personalizacion"
 c.JupyterHub.template_paths = [f"{PERSONALIZACION}/templates"]
-c.JupyterHub.logo_file = f"{PERSONALIZACION}/logo_uv_blanco.png"  # logo de la barra superior
+c.JupyterHub.logo_file = f"{PERSONALIZACION}/logo_uv_blanco.png"
 
-# El logo de la página de inicio de sesión se incrusta en el HTML (data URI)
-# para no tener que publicar archivos estáticos adicionales.
-with open(f"{PERSONALIZACION}/logo_informatica_azul.png", "rb") as f:
-    c.JupyterHub.template_vars = {
-        "logo_login": "data:image/png;base64," + base64.b64encode(f.read()).decode(),
-    }
+
+def imagen_incrustada(nombre):
+    """Devuelve el PNG como data URI para incrustarlo en el HTML.
+
+    Así los logos viajan dentro de la página: no hace falta publicar archivos
+    estáticos y el navegador no puede mostrar un logo antiguo guardado en caché
+    (con /hub/logo seguía apareciendo el logo de JupyterHub de pruebas anteriores).
+    """
+    with open(f"{PERSONALIZACION}/{nombre}", "rb") as f:
+        return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+
+
+c.JupyterHub.template_vars = {
+    "logo_barra": imagen_incrustada("logo_uv_blanco.png"),                  # barra superior
+    "logo_login": imagen_incrustada("logo_informatica_azul.png"),          # login, modo claro
+    "logo_login_oscuro": imagen_incrustada("logo_informatica_blanco.png"), # login, modo oscuro
+}
 
 # --- Estado del Hub ---------------------------------------------------------
 # jupyterhub.sqlite y jupyterhub_cookie_secret quedan en el directorio de

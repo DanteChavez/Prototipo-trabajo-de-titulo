@@ -9,46 +9,51 @@
   {# Estilo del formulario tomado del Portal UV (portal.uv.cl): etiquetas en azul,
      campos blancos con borde gris, ícono de llave en la contraseña y botón "Ingresar". #}
   <style>
-    body { --bs-body-bg: #fff; }
     #login-main { height: 75vh; }
     #login-main form.uv-login { width: 420px; max-width: 92vw; padding: 1rem 0; }
     .uv-login .uv-logo { display: block; width: 260px; max-width: 100%; margin: 0 auto 1.3rem; }
-    .uv-login h1 { color: var(--uv-azul); font-size: 1.5rem; font-weight: 700; text-align: center; margin-bottom: .2rem; }
-    .uv-login .uv-subtitulo { color: #6c757d; text-align: center; font-size: .95rem; margin-bottom: 1.8rem; }
+    .uv-login h1 { color: var(--uv-texto-titulo); font-size: 1.5rem; font-weight: 700; text-align: center; margin-bottom: .2rem; }
+    .uv-login .uv-subtitulo { color: var(--uv-texto-suave); text-align: center; font-size: .95rem; margin-bottom: 1.8rem; }
 
     .uv-login .uv-campo { margin-bottom: 1.4rem; }
-    .uv-login label { color: var(--uv-azul); font-size: 1.1rem; font-weight: 400; margin-bottom: .5rem; }
+    .uv-login label { color: var(--uv-texto-titulo); font-size: 1.1rem; font-weight: 400; margin-bottom: .5rem; }
     .uv-login .form-control {
-      color: #495057;
-      background: #fff;
-      border: 1px solid #ced4da;
+      color: var(--bs-body-color);
+      background: var(--uv-fondo-campo);
+      border: 1px solid var(--uv-borde-campo);
       border-radius: 5px;
       padding: .6rem .75rem;
       font-size: 1rem;
     }
     .uv-login .form-control:hover { border-color: #adb5bd; }
-    .uv-login .form-control:focus { border-color: var(--uv-azul); box-shadow: 0 0 0 .2rem rgba(0, 60, 88, .2); }
+    .uv-login .form-control:focus { border-color: var(--uv-accion); box-shadow: 0 0 0 .2rem rgba(0, 60, 88, .2); }
 
     /* Contraseña: llave a la izquierda y ojo a la derecha, ambos dentro del campo */
     .uv-login .uv-clave { position: relative; }
     .uv-login .uv-clave .form-control { padding-left: 2.6rem; padding-right: 2.8rem; }
-    .uv-login .uv-clave .fa-key { position: absolute; left: .9rem; top: 50%; transform: translateY(-50%); color: #495057; }
+    .uv-login .uv-clave .fa-key { position: absolute; left: .9rem; top: 50%; transform: translateY(-50%); color: var(--uv-texto-suave); }
     .uv-login #toggle_password_visibility {
       position: absolute; right: .4rem; top: 50%; transform: translateY(-50%);
-      border: 0; background: none; color: #495057; padding: .3rem .5rem;
+      border: 0; background: none; color: var(--uv-texto-suave); padding: .3rem .5rem;
     }
 
     .uv-login .feedback-container { display: flex; justify-content: flex-end; margin-top: 2rem; }
     .uv-login #login_submit {
       width: auto;
       color: #fff;
-      background: var(--uv-azul);
-      border: 1px solid var(--uv-azul);
+      background: var(--uv-accion);
+      border: 1px solid var(--uv-accion);
       border-radius: 5px;
       padding: .55rem 1.1rem;
       font-size: 1.1rem;
     }
-    .uv-login #login_submit:hover { background: #001114; border-color: #001114; }
+    .uv-login #login_submit:hover { background: var(--uv-accion-hover); border-color: var(--uv-accion-hover); }
+
+    /* Logo de la Escuela: azul en modo claro, blanco en modo oscuro */
+    .uv-login .uv-logo-oscuro { display: none; }
+    [data-bs-theme=dark] .uv-login .uv-logo-claro { display: none; }
+    [data-bs-theme=dark] .uv-login .uv-logo-oscuro { display: block; }
+    [data-bs-theme=dark] #login-main .uv-login .login_error { color: #ffb4ab; background: #3b1a17; }
 
     #login-main .uv-login .login_error {
       color: #b3261e;
@@ -62,7 +67,8 @@
 
 {% block login_container %}
   <form action="{{ authenticator_login_url }}" method="post" role="form" class="uv-login">
-    <img class="uv-logo" src="{{ logo_login }}" alt="Escuela de Ingeniería Informática, Universidad de Valparaíso" />
+    <img class="uv-logo uv-logo-claro" src="{{ logo_login }}" alt="Escuela de Ingeniería Informática, Universidad de Valparaíso" />
+    <img class="uv-logo uv-logo-oscuro" src="{{ logo_login_oscuro }}" alt="Escuela de Ingeniería Informática, Universidad de Valparaíso" />
     <h1>Entorno de Programación</h1>
     <p class="uv-subtitulo">Laboratorios de programación</p>
 
