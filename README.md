@@ -17,6 +17,7 @@ trabaja con su propia cuenta Unix.
 | `config/crear_usuarios.py` | Crea las cuentas Unix a partir de `users.txt` durante el build |
 | `config/jupyterhub_config.py` | Configuración de JupyterHub |
 | `config/personalizacion/` | Logos y plantillas HTML con la identidad visual de la UV |
+| `logos/` | Logos originales (UV, Facultad de Ingeniería, Escuela de Ingeniería Informática) y *Manual de Normas UV 2023* |
 | `docker-compose.yml` | Levanta JupyterHub con sus volúmenes persistentes |
 | `docker-compose.entorno.yml` | Levanta la imagen `latest` sola (Jupyter Lab sin login, etapa anterior) |
 
@@ -31,7 +32,7 @@ docker compose up --build
 ```
 
 Luego abrir <http://localhost:8000> e ingresar con una cuenta de `config/users.txt`
-(por ejemplo `alumno01` / `clave01`).
+(por ejemplo `alumno1`).
 
 La imagen `hub` parte de `dantechavez0/entorno-programacion:latest`. Si esa imagen no
 está en el Docker local, se descarga de Docker Hub. Para usar otra imagen de partida:
@@ -64,7 +65,7 @@ con los logos de la UV y de la Escuela de Ingeniería Informática.
   JupyterHub y solo cambian colores, textos (en español) y logos.
   `page.html` es la base de todas las páginas (barra superior, colores y pie de página),
   y `login.html`, `home.html` y `spawn_pending.html` cambian cada página.
-- `config/personalizacion/*.png`: logos recortados desde los originales de la UV.
+- `config/personalizacion/*.png`: logos recortados desde los originales de `logos/`.
 - Se activan en `jupyterhub_config.py` (`template_paths`, `logo_file`, `template_vars`).
 
 Esto solo afecta a las páginas de JupyterHub; JupyterLab mantiene su apariencia.
