@@ -13,12 +13,14 @@ services:
     volumes:
       - homes_estudiantes:/home          # archivos de cada estudiante (/home/<usuario>)
       - estado_hub:/srv/jupyterhub       # base de datos y secreto de cookies del Hub
+      - usuarios_hub:/var/lib/usuarios-hub  # registro de cuentas (usuario, UID, rol, contraseña cifrada)
     networks:
       - back_net
 
 volumes:
   homes_estudiantes:
   estado_hub:
+  usuarios_hub:
 
 networks:
   back_net:

@@ -1,8 +1,11 @@
 # Dockerfile de JupyterHub con usuarios locales de prueba
 #
 # Parte de la imagen del entorno de programación (Jupyter Lab + kernels de Python,
-# Java y C++) y le agrega JupyterHub. Los usuarios se leen de config/users.txt
+# Java y C++) y le agrega JupyterHub. Los usuarios iniciales se leen de config/users.txt
 # DURANTE EL BUILD: cada línea se convierte en una cuenta Unix con su /home/<usuario>.
+# Las cuentas se guardan en un registro (/var/lib/usuarios-hub) que el compose monta
+# como volumen; en el primer "docker compose up" Docker copia ahí el registro de la
+# imagen y desde entonces las cuentas se leen solo del volumen (ver config/iniciar_hub.sh).
 #
 # Se construye desde la raíz del repositorio (ver README.md):
 #   docker compose build
@@ -44,11 +47,30 @@ RUN mkdir -p /etc/skel/.jupyter/lab /etc/skel/.config && \
 RUN chmod -R a+rX /etc/skel /opt/libs /opt/java_kernel_install /usr/local/share/jupyter
 
 ############################
-# Usuarios de prueba (leídos de users.txt al construir)
+# Roles, sudo y contraseñas
+# Cada rol es un grupo Unix; JupyterHub deja entrar a quien pertenezca a uno de ellos
+# (allowed_groups en jupyterhub_config.py). Solo "administradores" puede usar sudo,
+# pidiendo su propia contraseña.
 #
-COPY config/users.txt config/crear_usuarios.py /etc/jupyterhub/
-RUN python /etc/jupyterhub/crear_usuarios.py /etc/jupyterhub/users.txt && \
-    rm /etc/jupyterhub/users.txt
+RUN groupadd -f estudiantes && groupadd -f profesores && groupadd -f administradores && \
+    echo "%administradores ALL=(ALL:ALL) ALL" > /etc/sudoers.d/administradores && \
+    chmod 0440 /etc/sudoers.d/administradores && \
+    visudo -cf /etc/sudoers.d/administradores
+
+# Nadie salvo root cambia contraseñas: sin el bit setuid, "passwd" no puede escribir en
+# /etc/shadow si lo ejecuta un estudiante o profesor. El admin las cambia con
+# "sudo crear_usuarios clave <usuario>", que además las guarda en el registro.
+RUN chmod u-s /usr/bin/passwd
+
+############################
+# Usuarios iniciales (leídos de users.txt al construir)
+# users.txt se monta solo durante este RUN (--mount=type=bind): no queda copiado en
+# ninguna capa de la imagen. En el registro queda la contraseña cifrada, no el texto.
+#
+COPY --chmod=0755 config/crear_usuarios.py /usr/local/sbin/crear_usuarios
+COPY --chmod=0755 config/iniciar_hub.sh /usr/local/sbin/iniciar_hub
+RUN --mount=type=bind,source=config/users.txt,target=/tmp/users.txt \
+    /usr/local/sbin/crear_usuarios agregar /tmp/users.txt
 
 ############################
 # Configuración del Hub
@@ -62,5 +84,6 @@ WORKDIR /srv/jupyterhub
 
 EXPOSE 8000
 
-# JupyterHub queda como PID 1 y reemplaza al ENTRYPOINT de Jupyter Lab de la imagen base.
-ENTRYPOINT ["/opt/miniconda3/bin/jupyterhub", "-f", "/etc/jupyterhub/jupyterhub_config.py"]
+# Al arrancar se recrean las cuentas del registro y luego JupyterHub queda como PID 1
+# (reemplaza al ENTRYPOINT de Jupyter Lab de la imagen base).
+ENTRYPOINT ["/usr/local/sbin/iniciar_hub"]

@@ -21,14 +21,18 @@ c.ConfigurableHTTPProxy.command = [
 ]
 
 # --- Autenticación: cuentas Unix del contenedor (PAM) -----------------------
-# Usuario y contraseña se validan contra /etc/passwd y /etc/shadow, que se
-# llenaron al construir la imagen a partir de config/users.txt.
+# Usuario y contraseña se validan contra /etc/passwd y /etc/shadow. Esas cuentas las
+# crea y las recrea al arrancar el script crear_usuarios, a partir del registro
+# persistente (ver Dockerfile_entornoProgramacion_hub e iniciar_hub.sh).
 c.JupyterHub.authenticator_class = "jupyterhub.auth.PAMAuthenticator"
 c.PAMAuthenticator.open_sessions = False  # las sesiones PAM no funcionan bien dentro de Docker
 
-# Solo pueden entrar las cuentas de users.txt (no root, ni devuser, ni cuentas del sistema).
-with open("/etc/jupyterhub/usuarios_permitidos.txt", encoding="utf-8") as f:
-    c.Authenticator.allowed_users = {linea.strip() for linea in f if linea.strip()}
+# Solo entran las cuentas de los grupos de rol (no root, ni devuser, ni cuentas del
+# sistema). La pertenencia al grupo se revisa en CADA inicio de sesión, así que una
+# cuenta que el admin crea con el Hub encendido puede entrar sin reiniciarlo.
+c.PAMAuthenticator.allowed_groups = {"estudiantes", "profesores", "administradores"}
+# Los administradores también ven el panel de administración del Hub (/hub/admin).
+c.PAMAuthenticator.admin_groups = {"administradores"}
 
 # --- Sesiones: un proceso Jupyter por usuario, con su UID -------------------
 c.JupyterHub.spawner_class = "jupyterhub.spawner.LocalProcessSpawner"
@@ -46,9 +50,8 @@ c.Spawner.env_keep.extend([
 def asegurar_home(spawner):
     """Crea /home/<usuario> si no existe.
 
-    Los homes se crean al construir la imagen, pero /home es un volumen
-    persistente: si más adelante se agregan usuarios a users.txt y se
-    reconstruye, el volumen antiguo no tiene sus carpetas.
+    crear_usuarios ya crea el home de cada cuenta; esto es un respaldo por si
+    la carpeta se borró del volumen /home mientras la cuenta seguía existiendo.
     """
     cuenta = pwd.getpwnam(spawner.user.name)
     if os.path.isdir(cuenta.pw_dir):

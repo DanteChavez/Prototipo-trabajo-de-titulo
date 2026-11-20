@@ -1,9 +1,17 @@
-# Usuarios de prueba de JupyterHub.
-# Formato: usuario:contraseña  (una cuenta por línea; las líneas con # se ignoran)
-# El Dockerfile del Hub lee este archivo AL CONSTRUIR la imagen y crea una cuenta Unix por línea.
-# Para agregar usuarios: añadirlos AL FINAL y reconstruir la imagen (ver README).
+# Usuarios INICIALES de JupyterHub.
+# Formato: usuario:contraseña[:rol]   rol = estudiante (por omisión), profesor o admin
+# Las líneas con # se ignoran.
+#
+# Este archivo se lee UNA vez, al construir la imagen. En el primer "docker compose up"
+# las cuentas pasan al volumen usuarios_hub y desde ahí se leen en cada arranque.
+# Para agregar usuarios con el Hub encendido NO se edita este archivo: el admin usa
+# "sudo crear_usuarios agregar <archivo>" (ver README).
+#
+# Mantener el orden: los UID se asignan en orden y deben coincidir con los archivos de /home.
 alumno1:1234
 alumno2:1234
 alumno3:1234
 alumno4:1234
 alumno5:1234
+profesor1:1234:profesor
+admin:admin1234:admin
