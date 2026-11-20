@@ -51,9 +51,11 @@ docker compose build --build-arg IMAGEN_ENTORNO=entorno-programacion:latest
   como `usuario:uid:rol:hash` (contraseña cifrada, nunca en texto plano). Esa carpeta es
   el volumen `usuarios_hub`: en el primer `docker compose up` Docker copia ahí el
   registro de la imagen, y desde entonces cada arranque lee **solo el volumen**.
-- **Arranque.** `iniciar_hub.sh` ejecuta `crear_usuarios restaurar`, que recrea las
-  cuentas del registro con su mismo UID (así siguen siendo dueñas de sus archivos en
-  `/home`), y luego abre JupyterHub.
+- **Arranque.** `iniciar_hub.sh` ejecuta `crear_usuarios restaurar` y luego abre
+  JupyterHub. El registro manda: las cuentas se recrean con el UID del registro (así
+  siguen siendo dueñas de sus archivos en `/home`), las cuentas de rol que no están en
+  el registro se eliminan (su home se conserva) y si un home no pertenece al UID de su
+  usuario se le corrige el dueño. Por eso el orden de `users.txt` no importa.
 - **Roles.** `estudiante`, `profesor` y `admin`, cada uno un grupo Unix (`estudiantes`,
   `profesores`, `administradores`). Solo `administradores` puede usar `sudo` (con su
   propia contraseña) y ve el panel de administración del Hub. Por ahora el profesor

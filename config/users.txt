@@ -6,8 +6,6 @@
 # las cuentas pasan al volumen usuarios_hub y desde ahí se leen en cada arranque.
 # Para agregar usuarios con el Hub encendido NO se edita este archivo: el admin usa
 # "sudo crear_usuarios agregar <archivo>" (ver README).
-#
-# Mantener el orden: los UID se asignan en orden y deben coincidir con los archivos de /home.
 alumno1:1234
 alumno2:1234
 alumno3:1234
