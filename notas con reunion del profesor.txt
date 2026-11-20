@@ -1,0 +1,16 @@
+[12:06 p.m., 16/11/2026] .: Comparar entrada por omisión vs la que tengo yo ( para el ppt, login de jupyterhub)
+[12:06 p.m., 16/11/2026] .: Que los estudiantes se sientan integrados a la escuela (lo de arriba)
+[12:07 p.m., 16/11/2026] .: No hablarlo tanto pero si es algo que las otras herramientas no tienen (para el ppt)
+[12:27 p.m., 16/11/2026] .: Diagrama de como se crean los usuarios iniciales 
+Básicamente:
+Dockerfile explicarlo como diagrama de flujo
+[12:42 p.m., 16/11/2026] .: Que crear usuarios.py puedes crear usuarios en caliente
+[12:54 p.m., 16/11/2026] .: ..
+Agregar usuarios que no son locales y que esos queden integrados en el Docker
+Para futuro
+Que queden de forma persistente y jupyter los suelte de forma locales
+
+
+Extra:
+script crear_usuarios.py = Se podria utilizar para crear usuarios locales cuando el contenedor del hub este funcionando
+y confirmar que un usuario local "admin" que pueda hacer sudo

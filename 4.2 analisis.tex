@@ -1,0 +1,790 @@
+% índice para no perderse
+\tableofcontents
+
+\section{Introducción}
+\label{sec:introduccion}
+
+En las asignaturas de \textit{Introducción a la programación} y \textit{Programación} del Plan Común de áreas de ingeniería y ciencias, que integran el plan de estudios de 10 carreras y congregan cada semestre a cerca de 500 estudiantes distribuidos en más de 10 secciones paralelas \cite{uv2026carreras}, acompañar el aprendizaje práctico en el laboratorio es un desafío operativo complejo. La literatura señala, entre los desafíos recurrentes de la programación introductoria, la dificultad de entregar retroalimentación oportuna durante las actividades prácticas y de acompañar individualmente a los estudiantes en cursos numerosos \cite{luxton2018introductory, medeiros2019systematic}. En el laboratorio, esto se traduce en dos obstáculos concretos. En primer lugar, el docente carece de un mecanismo directo para observar desde su puesto el código que un estudiante desarrolla cuando surgen consultas, lo que retrasa la ayuda y dificulta detectar errores compartidos por la sección. En segundo lugar, los ejercicios que el alumno codifica durante la sesión no quedan registrados de manera sistemática, lo que impide un seguimiento progresivo por estudiante y por sección.
+
+Diversos trabajos previos abordan aristas específicas de esta problemática. Por una parte, se han propuesto herramientas web para la visualización síncrona del código estudiantil en sesiones de tutoría \cite{guo2015codeopticon}, despliegues de JupyterHub con módulos de calificación sobre servidores físicos \cite{flemming2022jupyterhub} y experiencias de adopción de Kubernetes en entornos universitarios \cite{linhuber2026kubernetes}. Por otra parte, el análisis de entornos basados en cuadernos interactivos evidencia que delegar la instalación a los equipos personales de los alumnos introduce barreras de configuración de dependencias \cite{johnson2020benefits}, y el uso de plataformas gratuitas en la nube pública expone a los cursos a límites de cuota y tiempos de espera \cite{xu2023teaching}. No obstante, en la revisión realizada no se identificó una plataforma que articule en un mismo entorno la inspección docente del código durante el laboratorio, la recopilación continua en portafolios con plazos por sesión y la administración por secciones sobre una infraestructura de contenedores preparada para escalar.
+
+Para abordar esta brecha, este trabajo propone el desarrollo de un software web de apoyo a la práctica de programación en laboratorios docentes. La solución despliega JupyterHub sobre un clúster de Kubernetes de un solo nodo \cite{z2jh_architecture_2024}, con contenedores efímeros construidos a partir de imágenes de Docker, y divide el almacenamiento persistente de cada estudiante en un \textit{Espacio personal} de práctica diaria y un \textit{Portafolio de evaluación} (\textit{shipping}) \cite{k8s_pv_2024}. Las principales contribuciones de este trabajo son:
+
+\begin{enumerate}
+    \item \textbf{Arquitectura contenerizada en nodo único preparada para escalamiento horizontal:} diseño e implementación de una infraestructura con Kubernetes (\texttt{KubeSpawner}) y volúmenes persistentes desacoplados, que opera inicialmente en un único servidor para cubrir la demanda de las salas de laboratorio y permite escalar a múltiples servidores sin modificar los módulos del software.
+    \item \textbf{Mecanismo de almacenamiento dual con portafolio por sesión:} un esquema de archivos que separa la experimentación libre (\textit{Espacio personal}) del área de entregas (\textit{Portafolio de evaluación}), para registrar y consolidar el avance práctico clase a clase con validación de plazos y verificación ejecutable por el docente.
+    \item \textbf{Integración de seguimiento docente en tiempo casi real por sección académica:} módulos de gestión académica y supervisión que permiten al profesor consultar desde su puesto el código de sus estudiantes durante la clase y monitorear el cumplimiento acumulado de cada sección.
+\end{enumerate}
+
+El resto del documento se organiza en cuatro secciones. La Sección \ref{sec:marco_conceptual} presenta el marco conceptual (JupyterHub, contenedores, escalamiento, Kubernetes, almacenamiento persistente y portafolios digitales). La Sección \ref{sec:estado_del_arte} revisa el estado del arte bajo el método CIR e identifica la brecha que motiva el proyecto. La Sección \ref{sec:definicion_del_problema} define el problema, la solución propuesta, los objetivos y la importancia del trabajo. Finalmente, la Sección \ref{sec:analisis_requerimientos} especifica los requisitos y su modelamiento en UML 2.0.
+
+\section{Marco Conceptual}
+\label{sec:marco_conceptual}
+
+\subsection{Jupyter y JupyterHub}
+\label{subsec:jupyter_jupyterhub}
+
+Project Jupyter es una colección de software para la computación interactiva cuyos componentes permiten escribir, ejecutar y visualizar código desde un navegador web \cite{jupyter_docs_2024}. Su arquitectura distingue el entorno de ejecución individual de la gestión multiusuario.
+
+A nivel de usuario único, el espacio de trabajo opera mediante cuatro componentes:
+\begin{itemize}
+    \item \textbf{Jupyter Notebook (Cuaderno):} formato de documento estructurado en JSON que intercala celdas de código ejecutable, texto formateado (Markdown) y salidas multimedia \cite{jupyter_docs_2024}.
+    \item \textbf{JupyterLab:} interfaz gráfica web que actúa como entorno de desarrollo para editar los cuadernos y gestionar los archivos del usuario \cite{jupyterlab_docs_2024}.
+    \item \textbf{Kernel:} proceso independiente que ejecuta el código de las celdas (por ejemplo, el kernel IPython para Python) y devuelve los resultados a la interfaz.
+    \item \textbf{Jupyter Server:} servidor web de usuario único que comunica la interfaz (JupyterLab) con el Kernel mediante HTTP y WebSockets \cite{jupyter_server_docs_2024}.
+\end{itemize}
+
+Por ejemplo, en un entorno local, al iniciar una instancia de \textit{Jupyter Server} se levanta un servicio web accesible por la dirección de bucle invertido del equipo (\texttt{http://localhost:8888}). El navegador actúa como cliente en la misma máquina y el kernel consume directamente su procesador y su memoria RAM.
+
+Para ofrecer este espacio de trabajo a múltiples usuarios desde un servidor central se utiliza \textbf{JupyterHub}, que sirve y gestiona múltiples instancias independientes de \textit{Jupyter Server} \cite{jupyterhub_docs_2024}. Su modelo multiusuario se basa en tres subsistemas:
+
+\begin{itemize}
+    \item \textbf{Hub:} componente central que administra la base de datos y los perfiles de usuario, y controla el acceso mediante el módulo \textit{Authenticator}, que valida credenciales contra sistemas de identidad externos.
+    \item \textbf{Proxy HTTP:} enrutador dinámico que intercepta las peticiones web: si el usuario no está autenticado las envía al Hub, y si la sesión es válida las redirige a su servidor Jupyter privado.
+    \item \textbf{Spawner (Aprovisionador):} componente que inicia, monitorea y detiene los servidores individuales (\textit{Jupyter Server}). Cuando un usuario se autentica, levanta un entorno de ejecución exclusivo y aislado para esa sesión.
+\end{itemize}
+
+
+\subsection{Contenedores y Docker en un solo nodo}
+\label{subsec:contenedores_docker}
+
+La tecnología de contenedores empaqueta una aplicación con sus dependencias y configuración en una unidad ejecutable aislada. A diferencia de las máquinas virtuales, que emulan hardware y levantan un sistema operativo invitado completo por entorno, los contenedores se ejecutan en el espacio de usuario y comparten el núcleo (kernel) del sistema anfitrión. Esto reduce la sobrecarga de memoria y procesamiento, aísla a nivel de procesos y garantiza la reproducibilidad del entorno \cite{pahl2017cloud, docker_overview_2024}.
+
+Docker gestiona esta tecnología mediante dos entidades fundamentales:
+\begin{itemize}
+    \item \textbf{Imagen:} plantilla inmutable y de solo lectura con las instrucciones y dependencias necesarias para construir un entorno de ejecución.
+    \item \textbf{Contenedor:} instancia ejecutable de una imagen, de ciclo de vida efímero: puede iniciarse, detenerse o destruirse sin alterar la imagen base ni el sistema anfitrión \cite{docker_overview_2024}.
+\end{itemize}
+
+Al desplegar JupyterHub con Docker en un solo nodo (un servidor físico o virtual), el \textit{Spawner} (\texttt{DockerSpawner}) instancia un contenedor por cada usuario que inicia sesión, de modo que cada estudiante tiene un entorno de programación idéntico y aislado en la misma máquina.
+
+Sin embargo, un nodo único tiene límites: la cantidad de contenedores simultáneos queda restringida a la CPU y la RAM de ese servidor, y no hay redundancia ante fallos de hardware \cite{pahl2017cloud}.
+
+\subsection{Técnicas de escalamiento}
+\label{subsec:escalamiento}
+
+En los sistemas distribuidos, el escalamiento es la capacidad de una arquitectura para ajustar sus recursos computacionales frente a variaciones en la carga de trabajo \cite{vansteen2023distributed}. Existen dos técnicas principales para escalar software:
+
+\begin{itemize}
+    \item \textbf{Escalamiento vertical (Scale-up):} aumentar la capacidad de un único nodo, añadiendo hardware (CPU, RAM o almacenamiento) o asignando una mayor cuota de estos recursos a un proceso. Tiene un límite físico, el de la máquina anfitriona, y mantiene un único punto de fallo \cite{kleppmann2017designing}.
+    \item \textbf{Escalamiento horizontal (Scale-out):} aumentar la capacidad agregando instancias de software o nuevos nodos (servidores) que trabajan de forma coordinada. Permite superar los límites de una sola máquina y distribuir el riesgo de fallos \cite{kleppmann2017designing, vansteen2023distributed}.
+\end{itemize}
+
+Se distingue además entre \textbf{escalabilidad}, propiedad del sistema para soportar mayor carga agregando recursos de forma proporcional, y \textbf{elasticidad}, capacidad de aprovisionar y liberar esos recursos de forma dinámica y automática según la demanda \cite{vansteen2023distributed}.
+
+En un entorno de contenedores con Docker en \textbf{un solo nodo}, el escalamiento puede aplicarse a nivel local con \textit{Docker Engine} y \textit{Docker Compose}. El escalamiento vertical se logra modificando los límites de recursos del contenedor (parámetros como \texttt{-\hspace{0pt}-memory} o \texttt{-\hspace{0pt}-cpus}), con los que Docker ajusta los grupos de control (\textit{cgroups}) del kernel anfitrión \cite{docker_resources_2024}. El horizontal, dentro de un único nodo, se logra con la especificación de despliegue (\texttt{deploy}) de \textit{Docker Compose}, cuyo atributo \texttt{replicas} instancia varios contenedores idénticos de un mismo servicio \cite{docker_compose_deploy_2024}.
+
+Aun así, el escalamiento horizontal sigue acotado a los recursos de esa máquina. Superar ese límite exige escalar a nivel de infraestructura (múltiples nodos), lo que requiere un sistema de orquestación de clústeres \cite{pahl2017cloud}.
+
+\subsection{Orquestación con Kubernetes}
+\label{subsec:orquestacion_kubernetes}
+
+La orquestación de contenedores es la gestión automatizada de su ubicación, ciclo de vida, comunicación en red y disponibilidad sobre un conjunto de máquinas interconectadas (clúster) \cite{pahl2017cloud}.
+
+Una primera opción de orquestador, integrada en el motor de Docker, es \textbf{Docker Swarm} (\textit{Swarm mode}), que agrupa varias instancias de Docker Engine en nodos administradores (\textit{manager nodes}), que mantienen el estado del enjambre, y nodos trabajadores (\textit{worker nodes}), que solo ejecutan los contenedores asignados \cite{docker_swarm_2024}.
+
+\textbf{Kubernetes} es una plataforma de código abierto para la orquestación de cargas de trabajo contenerizadas que abstrae los recursos físicos de múltiples servidores bajo una API unificada \cite{k8s_components_2024}. Un clúster de Kubernetes se compone de dos elementos principales:
+
+\begin{itemize}
+    \item \textbf{Plano de Control (Control Plane):} servicios que gestionan el estado global del clúster: el servidor de la API (\texttt{kube-apiserver}), el almacén clave-valor (\texttt{etcd}), el gestor de controladores (\texttt{kube-controller-manager}), que mantiene el estado deseado de los objetos, y el planificador (\texttt{kube-scheduler}), que evalúa los recursos de cada servidor y decide dónde ubicar cada carga de trabajo \cite{k8s_components_2024}.
+    \item \textbf{Nodos (Nodes):} máquinas físicas o virtuales donde se despliegan las aplicaciones. Cada nodo ejecuta un agente (\texttt{kubelet}), que se comunica con el plano de control, y un motor de contenedores compatible con el estándar OCI (como \textit{containerd}), que ejecuta imágenes construidas con herramientas como Docker \cite{k8s_components_2024}.
+\end{itemize}
+
+En Kubernetes, la unidad mínima de despliegue no es el contenedor individual, sino el \textbf{Pod}, que encapsula uno o más contenedores que comparten almacenamiento y dirección IP dentro del clúster \cite{k8s_components_2024}.
+
+Para automatizar el escalamiento y la elasticidad, Kubernetes incorpora tres mecanismos generales \cite{k8s_autoscaling_2024}:
+\begin{enumerate}
+    \item \textbf{Horizontal Pod Autoscaler (HPA):} escala horizontalmente servicios sin estado, aumentando o disminuyendo el número de réplicas de un mismo Pod según el consumo de CPU o memoria.
+    \item \textbf{Vertical Pod Autoscaler (VPA):} escala verticalmente, ajustando las solicitudes y límites de CPU y memoria de los contenedores de un Pod.
+    \item \textbf{Cluster Autoscaler:} escala horizontalmente a nivel de infraestructura, incorporando o liberando nodos de trabajo cuando el \texttt{kube-scheduler} detecta Pods pendientes por falta de recursos.
+\end{enumerate}
+
+JupyterHub se integra con Kubernetes mediante \textbf{KubeSpawner} (parte de \textit{Zero to JupyterHub with Kubernetes}) \cite{z2jh_architecture_2024}. A diferencia de un microservicio que replica un mismo Pod con HPA, cada usuario de JupyterHub necesita un entorno con estado propio, por lo que \texttt{KubeSpawner} crea un Pod individual por cada estudiante autenticado. En un despliegue inicial de un solo nodo, la elasticidad consiste en crear el Pod al iniciar sesión y destruirlo por inactividad (\textit{culling}), liberando memoria. Para escalar a varios servidores se agregan nodos al clúster y el \texttt{kube-scheduler} distribuye los Pods entre las máquinas disponibles, sin alterar el software.
+
+\subsection{Almacenamiento persistente}
+\label{subsec:almacenamiento_persistente}
+
+El sistema de archivos interno de un contenedor es efímero por diseño. Al instanciarlo desde una imagen, el motor añade una capa superior de lectura y escritura (\textit{writable layer}) para los archivos creados o modificados durante la sesión. Esa capa está acoplada al contenedor: si este se elimina, o si el Pod es reubicado en otro nodo del clúster, sus datos se destruyen de forma permanente \cite{docker_storage_2024, k8s_volumes_2024}.
+
+Para conservar los archivos más allá del ciclo de vida del contenedor existen abstracciones de almacenamiento persistente:
+
+\begin{itemize}
+    \item \textbf{Persistencia en Docker (un solo nodo):} mediante \textit{bind mounts}, que montan un directorio del sistema anfitrión dentro del contenedor, o \textbf{Volúmenes de Docker}, directorios desacoplados del ciclo de vida del contenedor y administrados por el motor en un área dedicada del disco anfitrión \cite{docker_storage_2024}.
+    \item \textbf{Persistencia en Kubernetes (múltiples nodos):} como en un clúster el Pod puede crearse en cualquier servidor, el almacenamiento no puede depender del disco local de un nodo. Kubernetes separa la provisión del consumo con dos objetos: el \textbf{PersistentVolume (PV)}, recurso de almacenamiento en red (como NFS o Ceph) aprovisionado en el clúster, y el \textbf{PersistentVolumeClaim (PVC)}, solicitud de almacenamiento de un usuario \cite{k8s_pv_2024}. Al iniciar sesión con \texttt{KubeSpawner}, el PVC personal del estudiante se vincula a su Pod y monta sus archivos sin importar en qué nodo se ejecute \cite{z2jh_storage_2024}.
+\end{itemize}
+
+Para este software, el almacenamiento persistente se estructura en dos áreas, una para el trabajo del estudiante y otra para la supervisión docente:
+
+\begin{enumerate}
+    \item \textbf{Espacio personal de desarrollo:} directorio privado de lectura y escritura del estudiante para su trabajo en curso: crear scripts libremente, ejecutar pruebas de forma iterativa y modificar cuadernos interactivos durante las sesiones de laboratorio.
+    \item \textbf{Espacio de entrega y revisión (shipping):} área que resguarda las versiones finalizadas o seleccionadas para revisión formal. Separarla del espacio de experimentación evita que el trabajo a evaluar se altere accidentalmente mientras el estudiante sigue practicando, y ofrece al cuerpo docente un acceso estructurado y centralizado.
+\end{enumerate}
+
+\subsection{Técnicas de seguimiento del avance del estudiante}
+\label{subsec:tecnicas_seguimiento}
+
+Este apartado identifica técnicas para verificar que los estudiantes realizan el trabajo práctico asignado y conocer, clase a clase, los resultados que obtienen. Se describen tres, resumidas en la Tabla \ref{tab:tecnicas_seguimiento}, y al final se comparan según criterios derivados de los problemas de este trabajo para determinar cuál es la más adecuada.
+
+\subsubsection{Evaluación automática}
+Consiste en revisar automáticamente el código que entregan los estudiantes. Paiva et al. \cite{paiva2022automated} revisan el estado del arte de esta técnica: tipos de ejercicios soportados, medidas de seguridad, técnicas de prueba, retroalimentación generada e información que el sistema entrega al docente para comprender y optimizar el aprendizaje. Identifican una nueva etapa apoyada en técnicas de análisis estático y en la contenerización.
+
+\subsubsection{Control de versiones}
+Un sistema de control de versiones como Git permite al docente observar la evolución del trabajo del estudiante. Tu et al. \cite{tu2022github}, con la experiencia de 8 docentes de la Universidad de Auckland en 15 cursos, señalan que el docente con acceso puede clonar el repositorio de cada estudiante y revisar su historial completo de commits, lo que permite evaluar más allá del código final. También advierten que, con estudiantes novatos en Git, las pruebas fallidas del autocorrector de GitHub Classroom aparecen con marcas rojas que pueden preocuparlos, pues podrían interpretarlas como un commit fallido.
+
+\subsubsection{Portafolio digital}
+La tercera técnica es el portafolio digital, una colección de trabajos del estudiante acompañada de reflexión sobre lo aprendido. Olstad et al. \cite{olstad2025eportfolios} lo estudian como evaluación formativa en cursos de computación en Noruega, a partir de las reflexiones finales de 67 estudiantes, una encuesta nacional y observaciones de su desarrollo. Sus resultados indican que ayuda a los estudiantes a reconocer las competencias adquiridas y que varios reportaron mayor motivación para aprender. Garcia \cite{garcia2025portfolios} analiza portafolios digitales en un curso de diseño y desarrollo web con 176 estudiantes de pregrado, que completaron tareas semanales de programación culminadas en un portafolio programado por ellos mismos. Parte de la observación de que los estudiantes suelen dedicar poco esfuerzo a estos portafolios por considerar poco desafiante su componente de escritura, y reporta que la experiencia previa con portafolios digitales influye positivamente en el compromiso, la motivación y la apropiación del aprendizaje.
+
+\begin{table}[H]
+\centering
+\caption{Técnicas de seguimiento del avance del estudiante y fuentes que las sustentan.}
+\label{tab:tecnicas_seguimiento}
+\small
+\begin{tabular}{p{0.22\textwidth} p{0.50\textwidth} p{0.20\textwidth}}
+\toprule
+\textbf{Técnica} & \textbf{Qué registra o evalúa} & \textbf{Fuente} \\
+\midrule
+Evaluación automática & Verificación automatizada del código entregado y retroalimentación generada por el sistema & \cite{paiva2022automated} \\
+Control de versiones & Historial de commits de cada estudiante, accesible al docente & \cite{tu2022github} \\
+Portafolio digital & Colección de trabajos del estudiante con reflexión sobre lo aprendido & \cite{olstad2025eportfolios}, \cite{garcia2025portfolios} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Síntesis comparativa}
+La comparación se centra en el registro persistente y el seguimiento por estudiante y por sección, pues la inspección del código en tiempo real es un mecanismo síncrono de sala y no de recopilación histórica. Como se busca registrar el trabajo práctico y sus resultados clase a clase, se definen cinco criterios:
+
+\begin{itemize}
+    \item \textbf{Evidencia del trabajo por sesión:} comprobar que el estudiante desarrolló las actividades de cada clase, más allá de validar si la solución final es correcta.
+    \item \textbf{Evaluación de resultados del código:} verificar directamente la correctitud funcional o las salidas del programa del estudiante en cada sesión.
+    \item \textbf{Registro histórico longitudinal:} conservación estructurada y acumulativa de las entregas durante todo el periodo académico, para su revisión periódica.
+    \item \textbf{Seguimiento por estudiante y por sección:} organizar y consultar el avance de forma individual y por sección.
+    \item \textbf{Facilidad para estudiantes novatos:} bajo esfuerzo técnico adicional para registrar el avance, relevante porque la asignatura reúne a alumnos de primer año de distintas carreras \cite{uv2026carreras}.
+\end{itemize}
+
+La Tabla \ref{tab:comparacion_tecnicas} compara las tres técnicas según estos criterios. Las valoraciones corresponden a un análisis propio a partir de la literatura revisada.
+
+\begin{table}[H]
+\centering
+\caption{Comparación de las técnicas de seguimiento según los criterios definidos.}
+\label{tab:comparacion_tecnicas}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l c c c c c}
+\toprule
+\textbf{Técnica} & \textbf{Evidencia por sesión} & \textbf{Resultados del código} & \textbf{Registro longitudinal} & \textbf{Estudiante y sección} & \textbf{Facilidad para novatos} \\
+\midrule
+Evaluación automática & Media & Alta & Media & Media & Alta \\
+Control de versiones & Alta & Media & Alta & Media & Baja \\
+Portafolio digital & Alta & Media & Alta & Alta & Media \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+Ninguna técnica destaca en todos los criterios. La evaluación automática es la que mejor informa los resultados de cada clase y la más sencilla para novatos, pero se orienta a calificar la correctitud del producto entregado más que a recopilar el trabajo práctico realizado. El control de versiones conserva un registro histórico detallado, aunque exige aprender la herramienta, y Tu et al. \cite{tu2022github} advierten que los novatos en Git pueden malinterpretar las señales de pruebas fallidas, una carga adicional en una asignatura introductoria. El portafolio digital reúne el trabajo de cada clase ordenado por estudiante y por sección en un registro longitudinal, lo que lo hace la técnica más alineada con el problema planteado. Su principal riesgo es el señalado por Garcia \cite{garcia2025portfolios}: el poco esfuerzo que suelen dedicar los estudiantes a la redacción. Este riesgo se reduce si el portafolio se construye con los ejercicios de código que el estudiante ya realiza en clase, sin exigirle escritura adicional.
+
+Por estas razones, se selecciona el portafolio digital para dar seguimiento al trabajo de los estudiantes, alojado en el espacio de entrega y revisión (\textit{shipping}) de la subsección \ref{subsec:almacenamiento_persistente}. Se concibe como la recopilación de los ejercicios de cada clase, que el docente revisa clase a clase o de forma periódica. Se espera que su carácter obligatorio incentive a completar los ejercicios durante la sesión y permita considerar el porcentaje de entregas al final del semestre. Estas decisiones son política docente del curso: el software las habilita mediante el registro y seguimiento de las entregas, pero no las produce por sí mismo.
+
+Los estudios de portafolios revisados evalúan principalmente la percepción y el compromiso de los estudiantes, por lo que esta elección se sustenta en la adecuación a los criterios definidos y no en evidencia previa de que un portafolio obligatorio aumente por sí solo el trabajo en sala.
+
+\subsection{Estructuras de portafolio}
+\label{subsec:estructuras_portafolio}
+
+Seleccionado el portafolio digital, falta definir cómo se organizan y seleccionan sus evidencias. La literatura sobre evaluación con portafolios en educación superior y ciencias de la computación distingue tres estructuras según su propósito y los artefactos que almacenan \cite{olstad2025eportfolios, garcia2025portfolios}:
+
+\begin{itemize}
+    \item \textbf{Portafolio de vitrina o resultados (\textit{Showcase portfolio}):} reúne solo los mejores trabajos o productos finales al término de un periodo, para demostrar el máximo nivel de competencia alcanzado, sin borradores, errores previos ni ejercicios incompletos \cite{olstad2025eportfolios}.
+    \item \textbf{Portafolio de proceso o trabajo (\textit{Process / Working portfolio}):} estructura cronológica que almacena de forma continua las actividades prácticas, ejercicios en progreso e iteraciones sesión a sesión, para documentar la evolución del aprendizaje y permitir al docente observar el trabajo completado y las dificultades recurrentes \cite{olstad2025eportfolios}.
+    \item \textbf{Portafolio de evaluación (\textit{Assessment portfolio}):} estructura estandarizada que organiza los artefactos según criterios, rúbricas o unidades temáticas predefinidas por la institución o el cuerpo docente, para verificar sistemáticamente el cumplimiento de los requisitos del curso \cite{garcia2025portfolios}.
+\end{itemize}
+
+Dado que Garcia \cite{garcia2025portfolios} advierte el bajo compromiso de los estudiantes frente a componentes extensos de redacción reflexiva, se define como \textbf{decisión de diseño propia} una estructura híbrida entre el \textbf{portafolio de proceso} y el \textbf{portafolio de evaluación}, construida solo con los artefactos de código (cuadernos interactivos de Jupyter) de cada sesión de laboratorio, sin informes escritos adicionales.
+
+Este diseño vincula los dos espacios definidos en la subsección \ref{subsec:almacenamiento_persistente}: el estudiante resuelve los ejercicios en su \textit{Espacio personal} y, antes del vencimiento del plazo de la clase, envía la versión correspondiente al espacio de entrega y revisión (\textit{shipping}), llamado en el sistema \textit{Portafolio de evaluación}. Allí los archivos se organizan en una jerarquía de directorios indexada por sección académica, estudiante y número de sesión, se consolida una copia inmutable tras el cierre del plazo y el docente puede inspeccionarlos mediante copias de prueba ejecutables.
+
+\subsection{Síntesis}
+\label{subsec:sintesis_marco}
+
+JupyterHub provee el espacio de trabajo multiusuario \cite{jupyterhub_docs_2024}. Docker y Kubernetes aíslan cada entorno y permiten iniciar con un nodo para escalar después \cite{pahl2017cloud, z2jh_architecture_2024}, mientras que los volúmenes persistentes habilitan el almacenamiento dual \cite{k8s_pv_2024} sobre el que se construye el portafolio digital, técnica seleccionada por su mejor ajuste a los criterios definidos (Tabla \ref{tab:comparacion_tecnicas}) \cite{olstad2025eportfolios, garcia2025portfolios}. Estos elementos conforman el marco con el que se evalúan los trabajos previos en la siguiente sección.
+
+
+\section{Estado del Arte}
+\label{sec:estado_del_arte}
+El desafío central de este proyecto es la dificultad para medir la práctica de programación de los estudiantes en las asignaturas de programación del Plan Común, que se traduce en dos problemas (detallados en la Sección \ref{sec:definicion_del_problema}):
+\begin{enumerate}
+    \item Dificultad para acceder al código del estudiante en tiempo real, lo que impide resolver sus consultas de forma oportuna.
+    \item Falta de persistencia y trazabilidad de la práctica: no existe un registro sistemático del progreso por estudiante ni por sección.
+\end{enumerate}
+
+Las soluciones y tecnologías actuales se analizan con el método CIR (Contexto, Implementación, Resultados), que estructura la revisión de cada trabajo en tres ejes que aseguran una evaluación objetiva y comparable:
+\begin{itemize}
+    \item Contexto: problema que los autores buscaban resolver y escenario en que se aplicó la investigación.
+    \item Implementación: herramientas, arquitectura y metodología usadas para construir o desplegar la solución.
+    \item Resultados: evidencia empírica y métricas concretas (rendimiento, tiempos, capacidad, encuestas) obtenidas al aplicar el sistema, que permiten validar su efectividad.
+\end{itemize}
+
+Así, la revisión se estandariza y de cada documento se extraen solo los datos relevantes para contrastarlos con los problemas planteados.
+
+\subsection{Codeopticon: Real-Time, One-To-Many Human
+Tutoring for Computer Programming}
+Guo (2015) \cite{guo2015codeopticon} aborda directamente el primer problema: la dificultad de acceder al código del estudiante y dar asistencia personalizada en cursos de programación a gran escala. Identifica que los tutores no pueden observar directamente la depuración de cada alumno para ayudar a tiempo.
+
+Implementó una aplicación web con HTML5 y WebSockets que amplía la plataforma Online Python Tutor. A diferencia de infraestructuras contenerizadas complejas, presenta al profesor un panel centralizado con visualizaciones en tiempo real del editor de cada estudiante, que destaca errores de compilación y muestra los cambios del código mediante diferencias de texto (\textit{diffs}). Incluye además un historial interactivo para revisar las acciones previas del alumno antes de iniciar un chat de asistencia integrado.
+
+En una sesión de 30 minutos, un profesor llegó a monitorear a 226 estudiantes distintos en total, con 2 a 3 conversaciones de ayuda simultáneas en promedio. Cualitativamente, todos los participantes consideraron el sistema una alternativa auténtica a la tutoría presencial en laboratorio, con ventajas como medir el progreso colectivo de la clase y verificar si todos avanzaban de forma constante.
+
+%\subsection{Educational software-as-a-service based on JupyterHub and nbgrader running on Kubernetes}
+%\fnote{me lo tengo que conseguir}
+%Nota : no me lo consegui
+
+\subsection{On-Premise Kubernetes in Software Engineering Education: An Experience Report}
+Aunque se enmarca en la enseñanza de ingeniería de software y el despliegue de aplicaciones, el reporte de Linhuber et al. (2026) \cite{linhuber2026kubernetes} aporta antecedentes directos sobre la viabilidad de operar clústeres de Kubernetes propios (\textit{on-premise}) en una universidad, evitando la dependencia y los costos variables de la nube pública.
+
+Los autores desplegaron un clúster local sobre infraestructura universitaria e integraron el control de acceso con el sistema central de identidad de la institución, de modo que los estudiantes se autenticaban con sus credenciales universitarias y sus recursos se aislaban mediante permisos por rol.
+
+Mantener una plataforma contenerizada local redujo la sobrecarga operativa del equipo técnico frente a la provisión tradicional de máquinas virtuales individuales. Aunque el trabajo no aborda portafolios ni supervisión de código en cursos introductorios, sus resultados respaldan la factibilidad técnica de una infraestructura institucional basada en Kubernetes e integrada con la autenticación universitaria.
+
+\subsection{JupyterHub and autograding on bare-metal lab servers}
+Flemming (2022) \cite{flemming2022jupyterhub} aborda el segundo problema desde la gestión de tareas, buscando automatizar la evaluación y registrar el trabajo de los estudiantes. Analiza los desafíos técnicos de implementar JupyterHub junto con la herramienta de autocalificación nbgrader para un entorno con múltiples cursos y profesores simultáneos.
+
+A diferencia de un enfoque contenerizado, la plataforma se desplegó directamente sobre el sistema operativo de un servidor físico (\textit{bare-metal}), con entornos virtuales de Python y un servidor LDAP para autenticar usuarios. Para que la calificación soportara múltiples clases, los administradores debieron modificar el código fuente de la herramienta y configurar servicios de tokens en la API.
+
+Sin embargo, el despliegue sobre la capa base del sistema operativo generó severos conflictos técnicos, en particular con el módulo de autenticación de Linux (PAM). La gestión de sesiones paralelas provocaba errores de permisos denegados y fallos de segmentación (\textit{segfaults}), impedía aislar correctamente los recursos y obligó a deshabilitar el manejo nativo de sesiones. Esto refuerza la necesidad de usar contenedores aislados.
+
+\subsection{Teaching Heterogeneous and Parallel Computing with Google Colab and Raspberry Pi Clusters}
+Para evaluar la alternativa de delegar la ejecución a servicios externos sin administrar servidores propios, se revisa la experiencia de Xu (2023) \cite{xu2023teaching}. Aunque se desarrolla en un curso de computación paralela y heterogénea, expone las implicancias operativas de usar cuadernos Jupyter en nubes públicas gratuitas durante sesiones docentes.
+
+En la primera etapa de la asignatura, los estudiantes usaron Google Colab para escribir y ejecutar código desde el navegador, guardando sus cuadernos en cuentas personales de Google Drive, sin servidores locales en la facultad.
+
+Aunque esta modalidad eliminó los costos iniciales de equipamiento institucional, varios estudiantes señalaron en las encuestas que los límites de uso del servicio gratuito podían provocar largas esperas y reducir su productividad, especialmente al trabajar con cuadernos grandes que demandan recursos como GPU. Extrapolado al contexto de este trabajo, depender de cuentas personales en nubes comerciales deja los archivos del alumno fuera del control académico de la universidad y sin integración con secciones ni seguimiento docente. El límite de cuota, en cambio, probablemente pese menos en ejercicios introductorios, que demandan pocos recursos.
+
+\subsection{Benefits and Pitfalls of Jupyter Notebooks in the Classroom}
+Finalmente, sobre el entorno que usará el estudiante, Johnson (2020) \cite{johnson2020benefits} aborda los obstáculos técnicos y pedagógicos que surgen cuando los alumnos instalan y gestionan Jupyter Notebooks en sus propios equipos. Destaca que el formato de programación literaria de la herramienta es ideal para el aprendizaje iterativo y facilita desarrollar habilidades de comunicación técnica.
+
+No obstante, las instalaciones locales imponen altas barreras de entrada por la compleja gestión de dependencias y la incomprensión del modelo cliente-servidor. Además, evaluar código mediante el intercambio de archivos locales introduce riesgos de seguridad por la ejecución accidental de código malicioso. Para mitigarlos, el autor recomienda como mejor práctica configurar servidores remotos que estandaricen el entorno de trabajo, lo que fundamenta ofrecer un espacio en la nube gestionado por la institución.
+
+\subsection{Análisis Comparativo y Definición de la Brecha}
+
+De la revisión realizada se derivan cinco criterios que un sistema debe cumplir para acompañar y registrar la práctica de programación en el Plan Común de ingeniería:
+
+\begin{itemize}
+    \item \textbf{Monitoreo en Sala (Tiempo casi real):} observar desde el puesto del docente el código que el estudiante desarrolla durante la sesión, con intervalos breves de actualización y sin envío manual de archivos.
+    \item \textbf{Trazabilidad y Persistencia:} registro sistemático del progreso en un portafolio longitudinal y almacenamiento persistente del espacio de trabajo durante el semestre.
+    \item \textbf{Aislamiento de Entornos:} espacios de ejecución encapsulados que eviten conflictos de dependencias o permisos entre usuarios concurrentes.
+    \item \textbf{Escalabilidad:} capacidad de soportar más sesiones simultáneas y expandir los recursos computacionales.
+    \item \textbf{Gestión Institucional:} integrar autenticación universitaria unificada y estructurar a los usuarios en una jerarquía académica de secciones, docentes y estudiantes.
+\end{itemize}
+
+La Tabla \ref{tab:comparacion_estado_arte} contrasta los enfoques de la literatura revisada con el diseño propuesto.
+
+\begin{table}[htbp]
+\centering
+\caption{Análisis comparativo de soluciones para entornos de programación educativos.}
+\label{tab:comparacion_estado_arte}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l c c c c c}
+\toprule
+\textbf{Enfoque / Solución} & \textbf{Monitoreo en Sala} & \textbf{Trazabilidad} & \textbf{Aislamiento} & \textbf{Escalabilidad} & \textbf{Gestión Institucional} \\
+\midrule
+Plataformas Web Síncronas \cite{guo2015codeopticon} & Alta (Tiempo real) & Media (Solo sesión) & Baja & Baja & Nula (No autenticado) \\
+K8s On-Premise Educativo \cite{linhuber2026kubernetes} & Nula (Sin entorno) & Baja (Sin portafolio) & Alta (Pods) & Alta (Clúster) & Alta (SSO y roles) \\
+JupyterHub + nbgrader Bare-Metal \cite{flemming2022jupyterhub} & Baja (Solo entregas) & Alta (Tareas) & Baja (Conflictos OS) & Baja (Servidor único) & Media (Adaptación manual) \\
+Nubes Públicas (Ej. Colab) \cite{xu2023teaching} & Nula & Media (Cuenta personal) & Alta & Alta (Sujeta a cuotas) & Nula (Cuentas externas) \\
+Entornos Locales (BYOD) \cite{johnson2020benefits} & Nula & Baja & Alta (Físico) & Nula (Equipo propio) & Nula \\
+\midrule
+\textbf{Diseño Propuesto} & \textbf{Media (retardo $\leq$ 60 s)} & \textbf{Alta (Portafolio por sesión)} & \textbf{Alta (Contenedores)} & \textbf{Media (Escalable por diseño, 1 nodo)} & \textbf{Alta (Módulo de Secciones)} \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+Los enfoques revisados resuelven por separado aristas específicas del problema. Herramientas como Codeopticon \cite{guo2015codeopticon} destacan en la visibilidad síncrona del editor, pero operan sobre fragmentos de código acotados, sin almacenamiento persistente entre sesiones, estructura de secciones ni autenticación universitaria.
+
+Delegar la ejecución a los equipos personales introduce barreras de configuración de dependencias y riesgos al intercambiar archivos ejecutables \cite{johnson2020benefits}. Los servicios gratuitos en la nube pública eliminan la instalación local \cite{xu2023teaching}, pero sus restricciones de uso pueden afectar la continuidad de las sesiones y las cuentas personales desvían la custodia de los archivos fuera de la institución.
+
+En las plataformas institucionales basadas en JupyterHub, extensiones como \texttt{nbgrader} permiten distribuir tareas y recolectar entregas para calificarlas \cite{flemming2022jupyterhub}. Sin embargo, su despliegue \textit{bare-metal} presenta conflictos de aislamiento entre sesiones concurrentes y requiere modificaciones manuales para operar con múltiples cursos y profesores \cite{flemming2022jupyterhub}. Además, \texttt{nbgrader} está concebido para evaluar tareas formales y no permite al docente observar el código en desarrollo en el espacio personal del alumno durante la clase. Por su parte, los clústeres de Kubernetes locales confirman la robustez del aislamiento por contenedores y la integración con credenciales institucionales \cite{linhuber2026kubernetes}, pero requieren una capa de software académica que abstraiga la gestión de contenedores para docentes y estudiantes de primer año.
+
+\textbf{Limitaciones identificadas y oportunidad de mejora:} en la revisión realizada no se identificó una solución que combine en una misma plataforma el monitoreo docente del código durante la sesión, el registro continuo en portafolios con plazos por clase y el agrupamiento por secciones sobre contenedores orquestados. Existe, por tanto, la oportunidad de desarrollar un software apoyado en JupyterHub y Kubernetes que automatice el aprovisionamiento de entornos aislados y articule los módulos de control de acceso institucional, gestión de secciones, espacio de trabajo dual y seguimiento docente.
+
+
+
+
+\section{Definición del problema}
+\label{sec:definicion_del_problema}
+
+\subsection{Problema}
+\label{subsec:problema}
+
+En el Plan Común de áreas de ingeniería y ciencias se imparten las asignaturas de \textit{Introducción a la programación} y \textit{Programación}, cuyo propósito es que los estudiantes adquieran competencias iniciales de programación. Por ser una actividad eminentemente práctica, su diseño curricular combina bloques de teoría y sesiones de práctica en laboratorio \cite{luxton2018introductory}. En el laboratorio, la práctica se materializa principalmente en el análisis y ejecución de códigos de ejemplo y la resolución de ejercicios en sala \cite{zhi2019worked}. Medirla es necesario por dos razones. Primero, permite al docente ajustar el contenido y el ritmo de la clase según el avance real de los alumnos \cite{medeiros2019systematic}. Segundo, como los cursos reúnen a estudiantes de diversas disciplinas, la ejercitación supervisada es el mecanismo para que generalicen los conceptos teóricos mediante la práctica \cite{luxton2018introductory, zhi2019worked}.
+
+Operativamente, estas asignaturas se caracterizan por su escala masiva y su metodología presencial en laboratorio. Cada semestre abarcan 10 carreras de ingeniería \cite{uv2026carreras} y una matrícula cercana a los 500 estudiantes, distribuidos en más de 10 secciones paralelas a cargo de más de 10 profesores. Como los estudiantes desarrollan los ejercicios directamente durante el bloque de clases, esta escala plantea como desafío principal la dificultad para medir y acompañar su práctica de programación.
+
+De este desafío se desprenden dos problemas concretos:
+\begin{enumerate}
+    \item \textbf{Dificultades para acceder al código del estudiante durante la clase:} cuando surgen dudas, el docente carece de un mecanismo expedito para ver desde su puesto el código que el estudiante escribe en ese instante, lo que retrasa la resolución de consultas y la detección de errores comunes en la sala.
+    \item \textbf{Ausencia de registro de la práctica:} los ejercicios desarrollados en la sesión no se almacenan de manera sistemática, por lo que no existe un seguimiento histórico del trabajo ni por estudiante ni por sección.
+\end{enumerate}
+
+En conjunto, no poder inspeccionar el código oportunamente en sala ni contar con seguimiento continuo por estudiante y sección dificulta la dinámica que debe tener el proceso de enseñanza-aprendizaje en estas asignaturas \cite{medeiros2019systematic}. Además, como evidenció el estado del arte (Sección \ref{sec:estado_del_arte}), las plataformas existentes abordan el aprovisionamiento de infraestructura o la visualización en vivo de forma aislada, sin integrarlos bajo una estructura administrativa de múltiples secciones.
+
+\subsection{Solución}
+\label{subsec:solucion}
+
+Se propone un software de apoyo a la práctica de programación en el que el estudiante trabaja en un entorno accesible desde el navegador y el docente puede observar y medir esa práctica. Las decisiones de arquitectura responden a los hallazgos del estado del arte. Primero, se adopta un entorno centralizado en un servidor institucional para eliminar las barreras de configuración local reportadas por Johnson \cite{johnson2020benefits} y evitar los límites de cuota y las cuentas externas de las nubes públicas evidenciados por Xu \cite{xu2023teaching}. Segundo, para evitar los fallos de aislamiento y los conflictos de permisos a nivel de sistema operativo que Flemming documenta en despliegues \textit{bare-metal} \cite{flemming2022jupyterhub}, los entornos de usuario se encapsulan en contenedores efímeros. Tercero, siguiendo la factibilidad demostrada por Linhuber et al. para infraestructuras universitarias \textit{on-premise} \cite{linhuber2026kubernetes}, el alcance contempla un único servidor con un clúster de Kubernetes de un solo nodo integrado con JupyterHub (\texttt{KubeSpawner}) e imágenes construidas con Docker, y deja la arquitectura preparada para escalar agregando nuevos nodos sin modificar el software. Finalmente, para cubrir la necesidad de supervisión en el aula expuesta por Guo \cite{guo2015codeopticon} dentro de un entorno completo de Jupyter, se incorpora el acceso docente en tiempo casi real junto con el registro por sesión en portafolios.
+
+La Figura \ref{fig:arquitectura_solucion} presenta el diagrama de alto nivel de la solución: sus tres actores (Estudiantes, Profesores y Administradores) y la interacción entre sus cuatro módulos.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figuras/Entrega2-arquitectura solucion.pdf}
+    \caption{Diagrama de alto nivel de la solución propuesta para el Sistema de Apoyo a la Práctica de Programación.}
+    \label{fig:arquitectura_solucion}
+\end{figure}
+
+El software se organiza en los siguientes cuatro módulos:
+\begin{itemize}
+    \item \textbf{Módulo de Espacio de Trabajo del Estudiante:} provee al alumno el \textit{Entorno de programación} interactivo en el navegador, conectado a su \textit{Espacio de almacenamiento} persistente. Según el marco conceptual, este se divide en un \textbf{Espacio personal}, para el desarrollo libre y la experimentación diaria, y un \textbf{Portafolio de evaluación} (área de entrega o \textit{shipping}), donde se almacenan los ejercicios de cada sesión.
+    \item \textbf{Módulo de Seguimiento Docente:} se vincula en modo de consulta con el almacenamiento de los estudiantes y ofrece tres funcionalidades al profesor: el \textit{Seguimiento de estudiantes}, con acceso de lectura en tiempo casi real al código durante la sesión para resolver consultas, la \textit{Generación de ejercicios en sala} con plazo límite, para distribuir actividades a la sección, y la \textit{Revisión de portafolios}, para verificar y ejecutar en copias de prueba el avance acumulado por estudiante, sección y sesión.
+    \item \textbf{Módulo de Control de Acceso:} gestiona el ingreso y la operación segura mediante la \textit{Autenticación institucional} (cuentas de Microsoft de la universidad) y la \textit{Gestión de sesiones y permisos por rol}, que restringe las vistas y recursos de estudiantes, profesores y administradores.
+    \item \textbf{Módulo de Gestión Académica:} operado por los administradores, estructura la carga académica del semestre mediante la \textit{Gestión de profesores}, la \textit{Gestión de estudiantes} y la \textit{Gestión de secciones}, que establecen el agrupamiento lógico entre cada docente y sus alumnos.
+\end{itemize}
+
+
+\subsection{Objetivo general y específicos}
+\label{subsec:objetivos}
+
+\subsubsection*{Objetivo general}
+Desarrollar un software web de apoyo a la práctica de programación en laboratorios docentes, soportado sobre una infraestructura de contenedores, que permita a los profesores monitorear el código de los estudiantes durante la clase y realizar el seguimiento de su avance por estudiante y por sección mediante portafolios digitales.
+
+\subsubsection*{Objetivos específicos}
+\begin{enumerate}
+    \item Diseñar la arquitectura del sistema, integrando el aprovisionamiento de contenedores con JupyterHub sobre Kubernetes, el almacenamiento persistente en dos espacios (personal y de entrega) y el modelo de datos por secciones académicas.
+    \item Implementar los módulos de acceso institucional, gestión académica, espacio de trabajo del estudiante y seguimiento docente, que permitan monitorear el código en sala y revisar portafolios.
+    \item Validar el sistema mediante pruebas funcionales y de carga en un nodo, con 40 a 80 contenedores concurrentes, y estimar su escalabilidad frente a una matrícula de 500 usuarios.
+\end{enumerate}
+
+\subsection{Importancia del trabajo}
+\label{subsec:importancia}
+
+La importancia de este trabajo se fundamenta desde un \textbf{punto de vista social}, al incidir en las condiciones de enseñanza-aprendizaje de cerca de 500 estudiantes de primer año y más de 10 docentes de las 10 carreras que cursan el Plan Común de áreas de ingeniería y ciencias \cite{uv2026carreras}.
+
+Primero, ante la dificultad para observar el código en clase, el sistema busca mejorar la interacción entre docentes y estudiantes en las salas de laboratorio. Con alumnos de distinta familiaridad previa, las dudas de sintaxis o lógica suelen detener el trabajo hasta que el profesor llega al puesto del estudiante. Se espera que la consulta remota del código en tiempo casi real agilice la orientación y facilite identificar errores frecuentes en el grupo.
+
+Segundo, ante la ausencia de un registro continuo de la práctica, los portafolios por estudiante y por sección buscan evitar que las dificultades de aprendizaje pasen inadvertidas en grupos masivos. La evidencia sesión a sesión permite al cuerpo docente detectar tempranamente a los estudiantes que no completan las actividades, antes de las evaluaciones formales, y ajustar el ritmo y el apoyo pedagógico de cada sección.
+
+
+\section{Análisis de requerimientos}
+\label{sec:analisis_requerimientos}
+
+Esta sección especifica los requerimientos funcionales y no funcionales del sistema y su modelamiento en UML 2.0, a partir de los tres actores de la solución (Estudiante, Profesor y Administrador) y sus cuatro módulos funcionales.
+
+\subsection{Especificación de requisitos funcionales}
+\label{subsec:requisitos_funcionales}
+
+Los requisitos funcionales (RF) definen las capacidades y servicios que el software debe proveer a sus usuarios. A continuación se detallan los 13 RF, agrupados por módulo.
+
+\subsubsection{Módulo de Control de Acceso}
+\begin{itemize}
+    \item \textbf{RF-01 (Autenticación institucional):} el sistema debe permitir a estudiantes, profesores y administradores iniciar sesión con su correo y contraseña institucionales mediante el proveedor de identidad de Microsoft de la universidad.
+    \item \textbf{RF-02 (Gestión de sesiones y control de permisos por rol):} el sistema debe mantener activa la sesión del usuario autenticado, identificar su rol (Estudiante, Profesor o Administrador) y restringir el acceso a las vistas, contenedores y recursos autorizados para ese perfil.
+\end{itemize}
+
+\subsubsection{Módulo de Gestión Académica}
+\begin{itemize}
+    \item \textbf{RF-03 (Gestión CRUD de profesores):} el sistema debe permitir al administrador realizar operaciones CRUD (crear, leer, actualizar y eliminar o deshabilitar) sobre los registros de profesores.
+    \item \textbf{RF-04 (Gestión CRUD de estudiantes):} el sistema debe permitir al administrador realizar operaciones CRUD (crear, leer, actualizar y eliminar o deshabilitar) sobre los registros de estudiantes, incluida su importación mediante nóminas académicas.
+    \item \textbf{RF-05 (Gestión CRUD de secciones académicas):} el sistema debe permitir al administrador realizar operaciones CRUD sobre las secciones académicas de cada semestre, asociando a cada sección uno o más profesores y una lista de estudiantes matriculados.
+\end{itemize}
+
+\subsubsection{Módulo de Espacio de Trabajo del Estudiante}
+\begin{itemize}
+    \item \textbf{RF-06 (Aprovisionamiento del entorno de programación):} el sistema debe instanciar y asignar un contenedor individual con el entorno interactivo de Jupyter cuando el estudiante accede a su espacio de trabajo desde el navegador.
+    \item \textbf{RF-07 (Gestión de archivos en el espacio personal):} el sistema debe proveer al estudiante un directorio persistente de lectura y escritura (\textit{Espacio personal}) donde pueda crear, modificar, ejecutar y eliminar cuadernos interactivos y scripts durante sus sesiones de práctica.
+    \item \textbf{RF-08 (Obtención de ejercicios en sala):} el sistema debe permitir al estudiante visualizar los ejercicios publicados por el docente de su sección y descargar sus archivos base a su \textit{Espacio personal} para resolverlos.
+    \item \textbf{RF-09 (Entrega y actualización de ejercicios en el portafolio con cierre por plazo):} el sistema debe permitir al estudiante enviar un ejercicio resuelto desde su \textit{Espacio personal} a su \textit{Portafolio de evaluación} (área de \textit{shipping}). Mientras no venza el plazo límite fijado por el profesor, el estudiante podrá reentregar y actualizar la versión almacenada. Vencido el plazo, el sistema debe bloquear nuevos envíos y consolidar la última versión recibida como inmutable.
+\end{itemize}
+
+\subsubsection{Módulo de Seguimiento Docente}
+\begin{itemize}
+    \item \textbf{RF-10 (Visualización de secciones y estudiantes asignados):} el sistema debe presentar al profesor el listado de secciones bajo su cargo junto con la nómina de estudiantes matriculados en cada una.
+    \item \textbf{RF-11 (Acceso de lectura en tiempo casi real al código del estudiante en sala):} el sistema debe permitir al profesor acceder en solo lectura a los archivos del \textit{Espacio personal} de cualquier estudiante de sus secciones. Con un intervalo de autoguardado de hasta 60 segundos en el entorno del alumno, el docente observará el progreso del código en tiempo casi real para resolver consultas durante el laboratorio.
+    \item \textbf{RF-12 (Generación de ejercicios en sala con tiempo límite):} el sistema debe permitir al profesor crear y publicar ejercicios prácticos para una sección específica, definiendo su archivo base o instrucciones y configurando una fecha y hora límite para su entrega (por ejemplo, al finalizar el bloque de clases o al término del día).
+    \item \textbf{RF-13 (Revisión y ejecución de portafolios de evaluación):} el sistema debe permitir al profesor consultar los trabajos del \textit{Portafolio de evaluación} filtrados por sección, estudiante y sesión de laboratorio, y abrir los archivos bajo el esquema de inspección ejecutable de prueba sin alterar el respaldo original de la entrega.
+\end{itemize}
+
+La Tabla \ref{tab:resumen_rf} resume los RF con su identificador, nombre, módulo y actor principal.
+
+\begin{table}[H]
+\centering
+\caption{Resumen de los requisitos funcionales del sistema.}
+\label{tab:resumen_rf}
+\small
+\begin{tabular}{l p{0.35\textwidth} p{0.28\textwidth} l}
+\toprule
+\textbf{Código} & \textbf{Nombre del requisito} & \textbf{Módulo asociado} & \textbf{Actor} \\
+\midrule
+RF-01 & Autenticación institucional & Control de Acceso & Todos \\
+RF-02 & Gestión de sesiones y permisos por rol & Control de Acceso & Todos \\
+RF-03 & Gestión CRUD de profesores & Gestión Académica & Administrador \\
+RF-04 & Gestión CRUD de estudiantes & Gestión Académica & Administrador \\
+RF-05 & Gestión CRUD de secciones académicas & Gestión Académica & Administrador \\
+RF-06 & Aprovisionamiento del entorno & Espacio de Trabajo & Estudiante \\
+RF-07 & Gestión de archivos en espacio personal & Espacio de Trabajo & Estudiante \\
+RF-08 & Obtención de ejercicios en sala & Espacio de Trabajo & Estudiante \\
+RF-09 & Entrega y actualización de ejercicios en el portafolio con cierre por plazo & Espacio de Trabajo & Estudiante \\
+RF-10 & Visualización de secciones y estudiantes & Seguimiento Docente & Profesor \\
+RF-11 & Acceso de lectura en tiempo casi real al código del estudiante en sala & Seguimiento Docente & Profesor \\
+RF-12 & Generación de ejercicios con tiempo límite & Seguimiento Docente & Profesor \\
+RF-13 & Revisión de portafolios de evaluación & Seguimiento Docente & Profesor \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Diagramas y especificación de casos de uso}
+\label{subsec:casos_de_uso}
+
+El modelamiento de casos de uso en UML 2.0 representa las interacciones entre los actores externos y el sistema para alcanzar objetivos funcionales observables. Los tres actores son:
+
+\begin{itemize}
+    \item \textbf{Estudiante:} usuario matriculado en una sección que ejercita la programación en su contenedor personal y entrega sus actividades al portafolio de evaluación.
+    \item \textbf{Profesor:} docente a cargo de una o más secciones que publica ejercicios en sala, observa el código de sus alumnos en tiempo casi real y revisa los portafolios de evaluación.
+    \item \textbf{Administrador:} encargado técnico o coordinador académico que gestiona el registro de profesores, estudiantes y la conformación de las secciones por semestre.
+\end{itemize}
+
+La Figura \ref{fig:diagrama_casos_uso} presenta el diagrama general de casos de uso. Con el enfoque de objetivos de usuario de UML 2.0, los 13 RF se agrupan en 7 casos de uso (CU-01 a CU-07) que representan flujos de interacción completos. El acceso y la interacción inicial del alumno en su contenedor (RF-06, RF-07 y RF-08) forman CU-01, la visualización de nóminas por sección (RF-10) es el paso inicial de los casos de uso docentes (CU-03, CU-04 y CU-05), las operaciones CRUD (RF-03, RF-04 y RF-05) se consolidan en CU-06, y la seguridad y los permisos (RF-01 y RF-02) conforman el caso transversal de inclusión CU-07. Los demás RF corresponden uno a uno a CU-02 (RF-09), CU-03 (RF-11), CU-04 (RF-12) y CU-05 (RF-13).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.85\textwidth]{figuras/Entrega2-casos de uso.pdf}
+    \caption{Diagrama de casos de uso del Sistema de Apoyo a la Práctica de Programación.}
+    \label{fig:diagrama_casos_uso}
+\end{figure}
+
+Las Tablas \ref{tab:cu_01} a \ref{tab:cu_07} especifican cada caso de uso (actores, propósito, tipo, descripción, referencias cruzadas con los RF y curso normal de eventos).
+
+% --- TABLA CU-01 ---
+\begin{table}[H]
+\centering
+\caption{Especificación del caso de uso CU-01.}
+\label{tab:cu_01}
+\small
+\begin{tabular}{p{0.25\textwidth} p{0.68\textwidth}}
+\toprule
+\textbf{Caso de Uso} & \textbf{CU-01: Acceder al entorno y gestionar espacio personal} \\
+\midrule
+\textbf{Actores} & Estudiante (iniciador). \\
+\textbf{Propósito} & Proveer al estudiante un entorno de programación en contenedor para desarrollar y ejecutar ejercicios prácticos en su directorio privado. \\
+\textbf{Tipo} & Primario, esencial. \\
+\textbf{Descripción} & El estudiante ingresa a la plataforma, el sistema entrega un contenedor individual con Jupyter y monta su volumen persistente. El estudiante descarga los ejercicios de su sección y edita o ejecuta su código dentro de su Espacio personal. \\
+\textbf{Referencias cruzadas} & RF-06, RF-07, RF-08. Incluye a CU-07. \\
+\midrule
+\multicolumn{2}{l}{\textbf{Curso normal de eventos}} \\
+\midrule
+\textbf{Acción del Actor} & \textbf{Respuesta del Sistema} \\
+\midrule
+1. El Estudiante solicita acceder a su espacio de trabajo desde el navegador web. & 2. El sistema ejecuta el caso de uso CU-07 para verificar la sesión y el rol de Estudiante. \\
+ & 3. El sistema solicita a JupyterHub (mediante KubeSpawner) instanciar el contenedor del estudiante y montar su volumen persistente. \\
+ & 4. El sistema despliega la interfaz de programación mostrando el directorio del Espacio personal y los ejercicios disponibles para su sección. \\
+5. El Estudiante selecciona un ejercicio publicado en espacio virtual para trabajar en él. & 6. El sistema copia los archivos base del ejercicio hacia el Espacio personal del estudiante. \\
+7. El Estudiante edita las celdas de código, ejecuta el programa y guarda los cambios. & 8. El kernel del contenedor procesa las instrucciones, retorna las salidas en pantalla y almacena los archivos en el Espacio personal. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% --- TABLA CU-02 ---
+\begin{table}[H]
+\centering
+\caption{Especificación del caso de uso CU-02.}
+\label{tab:cu_02}
+\small
+\begin{tabular}{p{0.25\textwidth} p{0.68\textwidth}}
+\toprule
+\textbf{Caso de Uso} & \textbf{CU-02: Entregar ejercicio al portafolio de evaluación} \\
+\midrule
+\textbf{Actores} & Estudiante (iniciador). \\
+\textbf{Propósito} & Transferir o actualizar un ejercicio desde el Espacio personal hacia el Portafolio de evaluación dentro del plazo límite de la sesión. \\
+\textbf{Tipo} & Primario, esencial. \\
+\textbf{Descripción} & El estudiante selecciona un archivo de su Espacio personal para enviarlo a la actividad de la clase. Si el plazo sigue vigente, el sistema almacena la copia en el área de portafolio (\textit{shipping}), permitiendo reemplazarla mediante nuevas entregas hasta la hora de cierre, momento en que queda consolidada e inmutable. \\
+\textbf{Referencias cruzadas} & RF-09. Incluye a CU-07. \\
+\midrule
+\multicolumn{2}{l}{\textbf{Curso normal de eventos}} \\
+\midrule
+\textbf{Acción del Actor} & \textbf{Respuesta del Sistema} \\
+\midrule
+1. El Estudiante selecciona la opción de entregar un ejercicio desde su entorno de trabajo. & 2. El sistema valida la sesión activa mediante CU-07 y consulta los ejercicios con plazo abierto para la sección del estudiante. \\
+3. El Estudiante indica el archivo de su Espacio personal que corresponde a la actividad y confirma el envío. & 4. El sistema verifica que la fecha y hora actual del servidor sean anteriores o iguales a la fecha y hora límite configuradas por el profesor. \\
+ & 5. El sistema copia el archivo hacia el directorio del Portafolio de evaluación indexado por sección, estudiante y sesión (actualizando la entrega previa si existía una dentro del plazo) e impide la edición manual directa sobre dicho directorio. \\
+ & 6. El sistema registra la nueva marca de tiempo de la entrega y muestra un mensaje de confirmación al estudiante. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% --- TABLA CU-03 ---
+\begin{table}[H]
+\centering
+\caption{Especificación del caso de uso CU-03.}
+\label{tab:cu_03}
+\small
+\begin{tabular}{p{0.25\textwidth} p{0.68\textwidth}}
+\toprule
+\textbf{Caso de Uso} & \textbf{CU-03: Consultar código de estudiante en sala} \\
+\midrule
+\textbf{Actores} & Profesor (iniciador). \\
+\textbf{Propósito} & Visualizar en modo de solo lectura y en tiempo casi real el código que un estudiante está desarrollando en su Espacio personal durante la sesión de laboratorio. \\
+\textbf{Tipo} & Primario, esencial. \\
+\textbf{Descripción} & Durante la clase, el profesor selecciona una de sus secciones y elige a un estudiante de la nómina para inspeccionar los archivos de su Espacio personal (actualizados mediante autoguardado periódico de hasta 60 segundos) y resolver dudas sobre su código. \\
+\textbf{Referencias cruzadas} & RF-10, RF-11. Incluye a CU-07. \\
+\midrule
+\multicolumn{2}{l}{\textbf{Curso normal de eventos}} \\
+\midrule
+\textbf{Acción del Actor} & \textbf{Respuesta del Sistema} \\
+\midrule
+1. El Profesor accede al módulo de seguimiento docente. & 2. El sistema verifica las credenciales y el rol de Profesor mediante CU-07 y despliega las secciones asignadas al docente. \\
+3. El Profesor selecciona la sección en curso y elige a un estudiante del listado. & 4. El sistema consulta en modo de solo lectura el directorio del Espacio personal del estudiante seleccionado. \\
+5. El Profesor selecciona el cuaderno o script de código en el que está trabajando el alumno. & 6. El sistema renderiza la última versión autoguardada del archivo en la pantalla del profesor sin bloquear el entorno de edición del estudiante. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% --- TABLA CU-04 ---
+\begin{table}[H]
+\centering
+\caption{Especificación del caso de uso CU-04.}
+\label{tab:cu_04}
+\small
+\begin{tabular}{p{0.25\textwidth} p{0.68\textwidth}}
+\toprule
+\textbf{Caso de Uso} & \textbf{CU-04: Generar ejercicio en sala con plazo límite} \\
+\midrule
+\textbf{Actores} & Profesor (iniciador). \\
+\textbf{Propósito} & Crear y distribuir una actividad práctica para una sección académica definiendo su fecha y hora límite de recepción. \\
+\textbf{Tipo} & Primario, esencial. \\
+\textbf{Descripción} & El profesor publica un nuevo ejercicio para una de sus secciones, adjunta el cuaderno o archivo base de código y fija el tiempo límite hasta el cual se permitirán entregas en el portafolio. \\
+\textbf{Referencias cruzadas} & RF-10, RF-12. Incluye a CU-07. \\
+\midrule
+\multicolumn{2}{l}{\textbf{Curso normal de eventos}} \\
+\midrule
+\textbf{Acción del Actor} & \textbf{Respuesta del Sistema} \\
+\midrule
+1. El Profesor selecciona una de sus secciones y elige la opción de crear un ejercicio en sala. & 2. El sistema valida la sesión mediante CU-07 y despliega el formulario de configuración de la actividad. \\
+3. El Profesor ingresa el título, adjunta el archivo base del ejercicio y define la fecha y hora límite de entrega. & 4. El sistema valida que los campos estén completos y que la fecha límite sea posterior a la hora actual del servidor. \\
+5. El Profesor confirma la publicación del ejercicio. & 6. El sistema almacena el ejercicio asociado a la sección, crea el directorio de recepción en los portafolios y habilita la descarga para los estudiantes del grupo. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% --- TABLA CU-05 ---
+\begin{table}[H]
+\centering
+\caption{Especificación del caso de uso CU-05.}
+\label{tab:cu_05}
+\small
+\begin{tabular}{p{0.25\textwidth} p{0.68\textwidth}}
+\toprule
+\textbf{Caso de Uso} & \textbf{CU-05: Revisar portafolios de evaluación} \\
+\midrule
+\textbf{Actores} & Profesor (iniciador). \\
+\textbf{Propósito} & Consultar y ejecutar el registro de entregas de los estudiantes de una sección para monitorear su avance y verificar el funcionamiento de su código. \\
+\textbf{Tipo} & Primario, esencial. \\
+\textbf{Descripción} & El profesor accede al área de revisión de portafolios, filtra por sección, estudiante o sesión de laboratorio, y abre el código entregado en un entorno que permite su lectura, edición de prueba y ejecución para comprobar que la salida del programa sea correcta. \\
+\textbf{Referencias cruzadas} & RF-10, RF-13. Incluye a CU-07. \\
+\midrule
+\multicolumn{2}{l}{\textbf{Curso normal de eventos}} \\
+\midrule
+\textbf{Acción del Actor} & \textbf{Respuesta del Sistema} \\
+\midrule
+1. El Profesor ingresa a la vista de revisión de portafolios y selecciona una sección asignada. & 2. El sistema verifica el acceso mediante CU-07 y recupera el registro de entregas del área de portafolio (\textit{shipping}) para esa sección. \\
+ & 3. El sistema presenta una matriz con la nómina de estudiantes, los ejercicios realizados en el semestre y el estado de entrega de cada uno. \\
+4. El Profesor selecciona la entrega específica de un estudiante para una sesión determinada. & 5. El sistema carga una instancia del archivo almacenado en el Portafolio de evaluación junto con su fecha y hora de envío, habilitando permisos de lectura, escritura y ejecución para que el docente compruebe si la salida del código coincide con el resultado esperado. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% --- TABLA CU-06 ---
+\begin{table}[H]
+\centering
+\caption{Especificación del caso de uso CU-06.}
+\label{tab:cu_06}
+\small
+\begin{tabular}{p{0.25\textwidth} p{0.68\textwidth}}
+\toprule
+\textbf{Caso de Uso} & \textbf{CU-06: Gestionar usuarios y secciones académicas} \\
+\midrule
+\textbf{Actores} & Administrador (iniciador). \\
+\textbf{Propósito} & Mantener actualizado el registro de profesores, estudiantes y secciones académicas mediante operaciones CRUD. \\
+\textbf{Tipo} & Primario, esencial. \\
+\textbf{Descripción} & El administrador crea o actualiza las secciones del semestre, registra cuentas de profesores y estudiantes (de forma individual o por nómina) y asigna los participantes a cada sección. \\
+\textbf{Referencias cruzadas} & RF-03, RF-04, RF-05. Incluye a CU-07. \\
+\midrule
+\multicolumn{2}{l}{\textbf{Curso normal de eventos}} \\
+\midrule
+\textbf{Acción del Actor} & \textbf{Respuesta del Sistema} \\
+\midrule
+1. El Administrador accede al módulo de gestión académica. & 2. El sistema verifica el rol de Administrador mediante CU-07 y muestra el panel de administración de profesores, estudiantes y secciones. \\
+3. El Administrador ejecuta una operación CRUD sobre el registro de profesores o estudiantes (o carga una nómina de alumnos). & 4. El sistema valida el formato de los correos institucionales y actualiza los registros en la base de datos. \\
+5. El Administrador crea o selecciona una sección académica y le asocia uno o más profesores junto con su lista de estudiantes. & 6. El sistema registra los vínculos de la sección y configura los permisos de consulta docente y los directorios de almacenamiento correspondientes. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% --- TABLA CU-07 ---
+\begin{table}[H]
+\centering
+\caption{Especificación del caso de uso CU-07.}
+\label{tab:cu_07}
+\small
+\begin{tabular}{p{0.25\textwidth} p{0.68\textwidth}}
+\toprule
+\textbf{Caso de Uso} & \textbf{CU-07: Autenticar sesión institucional} \\
+\midrule
+\textbf{Actores} & Estudiante, Profesor, Administrador. \\
+\textbf{Propósito} & Validar la identidad del usuario a través de su cuenta institucional de Microsoft y autorizar los permisos correspondientes a su rol. \\
+\textbf{Tipo} & Secundario, de inclusión. \\
+\textbf{Descripción} & El sistema verifica si el usuario posee una sesión activa. En caso contrario, delega la validación del correo y contraseña al proveedor de identidad de Microsoft de la universidad y carga los permisos del perfil. \\
+\textbf{Referencias cruzadas} & RF-01, RF-02. Incluido por CU-01, CU-02, CU-03, CU-04, CU-05 y CU-06. \\
+\midrule
+\multicolumn{2}{l}{\textbf{Curso normal de eventos}} \\
+\midrule
+\textbf{Acción del Actor} & \textbf{Respuesta del Sistema} \\
+\midrule
+1. El Actor intenta ejecutar una funcionalidad protegida dentro del sistema. & 2. El sistema comprueba si existe un token de sesión activo. Si no existe, redirige al navegador hacia la pasarela de inicio de sesión de Microsoft. \\
+3. El Actor ingresa su correo electrónico institucional y su contraseña. & 4. El proveedor de Microsoft valida las credenciales y retorna la confirmación de identidad al sistema. \\
+ & 5. El sistema consulta el rol asociado al correo institucional en su base de datos (Estudiante, Profesor o Administrador) y habilita las vistas autorizadas. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%parte 3 
+\subsection{Diagramas de secuencia}
+\label{subsec:diagramas_secuencia}
+
+Las interacciones temporales entre los actores y los componentes internos se especifican en cuatro diagramas de secuencia, centrados en los contenedores, el almacenamiento persistente dual y el seguimiento docente: autenticación y aprovisionamiento del entorno (CU-01 y CU-07), entrega de ejercicios con validación de plazo (CU-02), consulta de código en sala y revisión ejecutable de portafolios (CU-03 y CU-05) y generación de ejercicios en sala (CU-04). CU-06 corresponde a transacciones CRUD estándar entre la interfaz de administración y la base de datos académica, por lo que no se diagrama.
+
+\subsubsection{Autenticación y aprovisionamiento del entorno (CU-01 y CU-07)}
+La Figura \ref{fig:ds_01} muestra el inicio de sesión institucional y la creación del contenedor del estudiante. Al solicitar acceso, el Módulo de Control de Acceso (integrado en el Hub) redirige la petición al proveedor de identidad de Microsoft de la universidad. Validadas las credenciales, el Hub verifica el rol e instruye a \texttt{KubeSpawner} instanciar el contenedor, y antes de habilitar la interfaz de Jupyter se monta el volumen persistente del alumno con su \textit{Espacio personal} y su \textit{Portafolio de evaluación}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figuras/Entrega2-DS-01 Autenticacion.pdf}
+    \caption{Diagrama de secuencia DS-01: Autenticación institucional y aprovisionamiento del entorno de trabajo.}
+    \label{fig:ds_01}
+\end{figure}
+
+\subsubsection{Entrega de ejercicio al portafolio de evaluación (CU-02)}
+La Figura \ref{fig:ds_02} representa cómo el estudiante entrega o actualiza un ejercicio desde su directorio de desarrollo al área de revisión (\textit{shipping}). Al recibir la solicitud, el Módulo de Espacio de Trabajo consulta en la base de datos académica el plazo límite de la actividad y, mediante un fragmento de alternativa (\texttt{alt}), evalúa su vigencia. Si el envío es oportuno, el archivo se copia del \textit{Espacio personal} al \textit{Portafolio de evaluación} (reemplazando cualquier envío previo de esa sesión) y se registra la marca de tiempo. Vencido el plazo, la operación se rechaza y la última versión almacenada queda consolidada de forma inmutable.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figuras/Entrega2-DS-02 Entrega al Portafolio.pdf}
+    \caption{Diagrama de secuencia DS-02: Entrega de ejercicio al portafolio con validación de plazo límite.}
+    \label{fig:ds_02}
+\end{figure}
+
+\subsubsection{Consulta de código en sala y revisión de portafolios (CU-03 y CU-05)}
+La Figura \ref{fig:ds_03} modela las dos modalidades de supervisión del profesor en el Módulo de Seguimiento Docente. Primero, el docente selecciona una sección y el sistema recupera la nómina de estudiantes con su matriz de entregas. Luego, un fragmento condicional (\texttt{alt}) distingue el objetivo. Para asistir una duda en sesión (CU-03), el módulo accede en solo lectura al \textit{Espacio personal} del alumno y muestra la última versión autoguardada de su código en tiempo casi real. Para revisar el avance en el portafolio (CU-05), durante la sesión o tras el cierre del plazo, carga una copia de trabajo desde el \textit{Portafolio de evaluación} con ejecución y edición de prueba, para verificar que la salida coincida con lo solicitado sin modificar el archivo entregado.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figuras/Entrega2-DS-03 Seguimiento y Revision Docente.pdf}
+    \caption{Diagrama de secuencia DS-03: Consulta de código en sala y revisión ejecutable de portafolios.}
+    \label{fig:ds_03}
+\end{figure}
+
+\subsubsection{Generación de ejercicio en sala con plazo límite (CU-04)}
+La Figura \ref{fig:ds_04} describe la publicación de una actividad práctica para una sección. El profesor ingresa las instrucciones, adjunta el archivo base y define la fecha y hora límite de recepción. El Módulo de Seguimiento Docente registra los metadatos y el plazo en la base de datos académica y luego guarda la plantilla en el sistema de archivos persistente, preparando los directorios del portafolio para recibir los envíos de la sección.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figuras/Entrega2-DS-04 Generacion de Ejercicio en Sala.pdf}
+    \caption{Diagrama de secuencia DS-04: Generación y publicación de ejercicio en sala con plazo límite.}
+    \label{fig:ds_04}
+\end{figure}
+
+
+%parte 4
+\subsection{Diagramas de estado}
+\label{subsec:diagramas_estado}
+
+Se modelan los estados de los dos elementos que gobiernan el consumo de recursos del servidor y la trazabilidad académica: el contenedor efímero del estudiante y la entrega de un ejercicio al portafolio de evaluación.
+
+\subsubsection{Ciclo de vida del contenedor del estudiante}
+La Figura \ref{fig:de_01} presenta los estados del entorno de programación del alumno con contenedores efímeros y almacenamiento desacoplado. Sin sesión activa, el entorno está en el estado \textit{Sin contenedor activo}: en el servidor solo existen sus directorios persistentes, sin consumir RAM, procesador ni capas de contenedores detenidos.
+
+Cuando el estudiante inicia sesión con sus credenciales institucionales, el sistema pasa a \textit{En aprovisionamiento}: \texttt{KubeSpawner} crea un contenedor nuevo desde la imagen base y monta el volumen del alumno (\textit{Espacio personal} y \textit{Portafolio de evaluación}). Montado el almacenamiento, el entorno queda \textit{En ejecución} mientras dure la sesión. Si el estudiante cierra sesión o alcanza el límite de inactividad, pasa a \textit{En destrucción de contenedor}: se desmonta el volumen para resguardar los archivos, se elimina el contenedor y se vuelve al estado inicial hasta un nuevo inicio de sesión.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figuras/Entrega2-DE-01 Estado del Contenedor.pdf}
+    \caption{Diagrama de estado DE-01: Ciclo de vida del contenedor efímero del estudiante.}
+    \label{fig:de_01}
+\end{figure}
+
+\subsubsection{Ciclo de vida del ejercicio y entrega al portafolio}
+La Figura \ref{fig:de_02} modela los estados de una actividad práctica desde su publicación hasta su verificación docente. Parte en \textit{Publicado en sala}, cuando el profesor crea el ejercicio y fija su plazo, y pasa a \textit{En desarrollo} en el \textit{Espacio personal} del estudiante al ser descargado.
+
+Si el alumno envía antes del vencimiento, la actividad pasa a \textit{Entregado en portafolio} y se guarda en el área de \textit{shipping}, donde puede reentregar mientras el plazo siga abierto. Al cumplirse el plazo, la última entrega pasa a \textit{Entrega consolidada} y es inmutable para el estudiante. Desde ahí, cuando el profesor abre y ejecuta la entrega sobre una copia de trabajo, alcanza el estado \textit{Revisado y ejecutado por docente} sin alterar el respaldo original. Si el plazo vence sin envío desde \textit{Publicado en sala} o \textit{En desarrollo}, la actividad pasa al estado terminal \textit{No entregado}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figuras/Entrega2-DE-02 Estado de Ejercicio y Entrega.pdf}
+    \caption{Diagrama de estado DE-02: Ciclo de vida del ejercicio en sala y su entrega al portafolio.}
+    \label{fig:de_02}
+\end{figure}
+
+\subsection{Modelo conceptual de datos}
+\label{subsec:modelo_datos}
+
+La información del sistema se organiza en torno a la vinculación entre la carga académica semestral y el almacenamiento persistente dual de cada alumno. La Figura \ref{fig:modelo_conceptual_datos} presenta el modelo conceptual como diagrama de clases de dominio UML 2.0, con las entidades, sus atributos principales y las multiplicidades que rigen la trazabilidad por estudiante y sección.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=1\textwidth]{figuras/Entrega2-Modelo conceptual de datos.pdf}
+    \caption{Modelo conceptual de datos del Sistema de Apoyo a la Práctica de Programación.}
+    \label{fig:modelo_conceptual_datos}
+\end{figure}
+
+El modelo se articula en los siguientes grupos de entidades:
+\begin{itemize}
+    \item \textbf{Jerarquía de usuarios:} \textit{Usuario} centraliza los atributos comunes (correo institucional, nombre y estado de la cuenta) y se especializa en tres subclases: \textit{Administrador}, \textit{Profesor} y \textit{Estudiante}.
+    \item \textbf{Estructura académica:} una \textit{Asignatura} del Plan Común (como \textit{Introducción a la programación} o \textit{Programación}) se divide en una o más \textit{Secciones Académicas} por semestre. Cada sección tiene uno o más \textit{Profesores} y agrupa a múltiples \textit{Estudiantes} (relaciones de muchos a muchos), lo que permite aislar los permisos de consulta docente según las secciones de cada profesor.
+    \item \textbf{Composición del almacenamiento:} cada \textit{Estudiante} posee de forma exclusiva un \textit{Espacio de Almacenamiento} persistente en el servidor, compuesto por un \textit{Espacio Personal} (lectura y escritura para la práctica diaria) y un \textit{Portafolio de Evaluación} (directorio de \textit{shipping}, que define el índice de sesiones y los permisos de acceso e inspección docente).
+    \item \textbf{Trazabilidad de ejercicios y entregas por sesión:} una \textit{Sección Académica} registra cero o más \textit{Ejercicios en Sala}, que identifican la sesión de laboratorio a la que pertenecen, la ruta del archivo base y la fecha y hora límite. La \textit{Entrega de Portafolio} vincula el \textit{Portafolio de Evaluación} del alumno con el \textit{Ejercicio en Sala} correspondiente y registra el número de sesión, la ruta del archivo entregado, la marca de tiempo, el estado de cumplimiento y un indicador booleano de inmutabilidad.
+\end{itemize}
+
+\subsection{Especificación de requisitos no funcionales}
+\label{subsec:requisitos_no_funcionales}
+
+Las restricciones técnicas de operación derivan del despliegue en un servidor central con contenedores efímeros, la persistencia desacoplada de los archivos, la seguridad al ejecutar código arbitrario y la preparación para un escalamiento futuro. Se especifican a continuación los ocho requisitos no funcionales (RNF) con sus umbrales de verificación:
+
+\begin{itemize}
+    \item \textbf{RNF-01 (Tiempo de aprovisionamiento y liberación de contenedores efímeros):} el sistema debe entregar el contenedor individual del estudiante en menos de 15 segundos desde la validación de sus credenciales (con la imagen base precargada en el nodo), y destruir todo contenedor que supere 30 minutos de inactividad o cierre su sesión, liberando el 100\% de la memoria RAM asignada al Pod.
+    \item \textbf{RNF-02 (Persistencia desacoplada del ciclo de vida del contenedor):} los directorios del \textit{Espacio personal} y del \textit{Portafolio de evaluación} deben residir en volúmenes persistentes del servidor, con una cuota de hasta 500 MB por estudiante, garantizando cero pérdida de archivos tras la destrucción del contenedor efímero al finalizar cada sesión.
+    \item \textbf{RNF-03 (Integridad e inmutabilidad del respaldo en el portafolio):} los archivos del \textit{Portafolio de evaluación} solo pueden actualizarse mediante reentregas del estudiante mientras el plazo límite de la sesión siga abierto ($t_{\text{envío}} \le t_{\text{límite}}$), y quedan bloqueados con permisos de solo lectura una vez vencido. Cuando el profesor abra una entrega para ejecutarla y verificar su salida, el sistema debe operar sobre una copia temporal aislada que garantice cero modificaciones sobre el archivo original entregado.
+    \item \textbf{RNF-04 (Cuotas de recursos y concurrencia para sesiones de laboratorio):} el sistema debe almacenar en disco los volúmenes de toda la matrícula semestral (cerca de 500 estudiantes) y garantizar en un único nodo, como mínimo, la operación simultánea de una a dos salas de laboratorio (entre 40 y 80 contenedores concurrentes) \cite{uv_infraestructura}, considerando a los 500 usuarios como cota superior teórica de dimensionamiento.
+    \item \textbf{RNF-05 (Orquestación en nodo único preparada para escalamiento horizontal):} el sistema debe desplegarse sobre Kubernetes de un solo nodo con \texttt{KubeSpawner} y \textit{PersistentVolumeClaims}, de modo que incorporar nuevos nodos de trabajo al clúster requiera cero modificaciones en el código fuente de los módulos académicos.
+    \item \textbf{RNF-06 (Acceso web sin configuración local):} el 100\% de las funcionalidades de edición de código, ejecución interactiva y envío al portafolio deben operar a través de HTTPS (puerto 443) desde un navegador web estándar compatible con HTML5, sin instalaciones locales en el equipo cliente.
+    \item \textbf{RNF-07 (Aislamiento docente por sección y sincronización casi real):} el sistema debe restringir las consultas de código en sala y la revisión de portafolios únicamente a las secciones asignadas al profesor autenticado. Además, el entorno del estudiante debe configurar un autoguardado automático de 60 segundos como máximo para respaldar la visualización docente en tiempo casi real.
+    \item \textbf{RNF-08 (Aislamiento de seguridad para ejecución de código arbitrario):} como la plataforma ejecuta código escrito por estudiantes y probado por docentes, cada contenedor debe ejecutarse con un usuario sin privilegios de superusuario (\texttt{non-root}, p. ej., UID 1000), con escalamiento de privilegios deshabilitado (\texttt{allowPrivilegeEscalation: false}) y con políticas de red que bloqueen el acceso directo hacia los contenedores de otros alumnos o servicios internos del servidor.
+\end{itemize}
+
+La Tabla \ref{tab:resumen_rnf} resume los RNF con su umbral verificable y su categoría de calidad.
+
+\begin{table}[H]
+\centering
+\caption{Resumen de los requisitos no funcionales del sistema.}
+\label{tab:resumen_rnf}
+\small
+\begin{tabular}{l p{0.38\textwidth} p{0.25\textwidth} l}
+\toprule
+\textbf{Código} & \textbf{Nombre del requisito} & \textbf{Umbral / Métrica} & \textbf{Categoría} \\
+\midrule
+RNF-01 & Aprovisionamiento y liberación efímera & Inicio $< 15\text{ s}$, inactividad $30\text{ min}$ & Eficiencia \\
+RNF-02 & Persistencia desacoplada del contenedor & Cuota $500\text{ MB}$, $0\%$ pérdida & Fiabilidad \\
+RNF-03 & Integridad del respaldo en portafolio & Inmutable tras $t_{\text{límite}}$, copia docente & Integridad \\
+RNF-04 & Concurrencia en sala y cuotas por Pod & $40$--$80$ activos ($500$ máx.) & Rendimiento \\
+RNF-05 & Orquestación en nodo único escalable & K8s/\texttt{KubeSpawner}, $0$ cambios al escalar & Escalabilidad \\
+RNF-06 & Acceso web sin configuración local & $100\%$ vía navegador (HTTPS/HTML5) & Usabilidad \\
+RNF-07 & Aislamiento por sección y tiempo casi real & Autoguardado $\le 60\text{ s}$ & Privacidad \\
+RNF-08 & Ejecución segura de código (\textit{sandboxing}) & Contenedor \texttt{non-root}, red aislada & Seguridad \\
+\bottomrule
+\end{tabular}
+\end{table}
