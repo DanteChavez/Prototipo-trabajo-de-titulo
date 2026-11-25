@@ -1,0 +1,100 @@
+# Dockerfile de JupyterHub con usuarios locales de prueba
+#
+# Parte de la imagen del entorno de programación (Jupyter Lab + kernels de Python,
+# Java y C++) y le agrega JupyterHub. Los usuarios están en una base de datos SQLite
+# (/var/lib/usuarios-hub/usuarios.db) en el volumen usuarios_hub. Como el build no ve
+# los volúmenes, aquí solo se convierte config/users.txt en la lista "usuarios de la
+# imagen", con las contraseñas cifradas; en cada arranque los que falten se
+# insertan en la BD y las cuentas Unix se regeneran desde ella (ver config/iniciar_hub.sh).
+#
+# Scripts de usuarios (todos usan el módulo config/usuarios.py):
+#   cargar_usuarios_iniciales  aquí, en el build: users.txt -> usuarios de la imagen
+#   restaurar_usuarios         en cada arranque (iniciar_hub.sh)
+#   gestionar_usuarios         el admin, con sudo (agregar, clave, eliminar, listar)
+#
+# Se construye desde la raíz del repositorio (ver README.md):
+#   docker compose build
+
+ARG IMAGEN_ENTORNO=dantechavez0/entorno-programacion:latest
+FROM ${IMAGEN_ENTORNO}
+
+LABEL "description"="JupyterHub con usuarios locales sobre el entorno de programación"
+
+USER root
+
+############################
+# JupyterHub
+# El Hub (jupyterhub-base, solo Python) va en el entorno base, junto a Jupyter Lab y los
+# kernels, porque cada sesión de usuario ejecuta jupyterhub-singleuser desde ahí.
+#
+# El proxy (configurable-http-proxy) necesita Node.js y va en un entorno conda APARTE
+# ("proxy"), solo con paquetes de conda-forge. Si Node.js se instala en el entorno base,
+# carga la librería brotli antigua de ese entorno y falla al arrancar con:
+#   node: symbol lookup error: ... libnode.so: undefined symbol: BrotliEncoderAttachPreparedDictionary
+# La ruta del proxy se fija en config/jupyterhub_config.py.
+#
+# No se ejecuta "conda clean": la imagen base usa una librería dentro de /opt/miniconda3/pkgs.
+#
+RUN conda install -c conda-forge jupyterhub-base --yes
+RUN conda create -n proxy --override-channels -c conda-forge configurable-http-proxy --yes
+
+############################
+# Configuración por defecto de cada usuario (/etc/skel)
+# En la imagen base, los ajustes de JupyterLab viven en /root y solo sirven a root.
+# Lo que se deja en /etc/skel se copia al home de cada cuenta que se crea.
+#
+RUN mkdir -p /etc/skel/.jupyter/lab /etc/skel/.config && \
+    cp -r /root/.jupyter/lab/user-settings /etc/skel/.jupyter/lab/ && \
+    cp -r /root/.config/Ultralytics /etc/skel/.config/ && \
+    find /etc/skel -name '._*' -delete
+
+# Los kernels y librerías se instalaron como root: se asegura que cualquier usuario pueda leerlos.
+RUN chmod -R a+rX /etc/skel /opt/libs /opt/java_kernel_install /usr/local/share/jupyter
+
+############################
+# Roles, sudo y contraseñas
+# Cada rol es un grupo Unix; JupyterHub deja entrar a quien pertenezca a uno de ellos
+# (allowed_groups en jupyterhub_config.py). Solo "administradores" puede usar sudo,
+# pidiendo su propia contraseña.
+#
+RUN groupadd -f estudiantes && groupadd -f profesores && groupadd -f administradores && \
+    echo "%administradores ALL=(ALL:ALL) ALL" > /etc/sudoers.d/administradores && \
+    chmod 0440 /etc/sudoers.d/administradores && \
+    visudo -cf /etc/sudoers.d/administradores
+
+# Nadie salvo root cambia contraseñas: sin el bit setuid, "passwd" no puede escribir en
+# /etc/shadow si lo ejecuta un estudiante o profesor. El admin las cambia con
+# "sudo gestionar_usuarios clave <usuario>", que además la guarda en la base de datos.
+RUN chmod u-s /usr/bin/passwd
+
+############################
+# Usuarios de la imagen (leídos de users.txt al construir)
+# users.txt se monta solo durante este RUN (--mount=type=bind): no queda copiado en
+# ninguna capa de la imagen. En /etc/usuarios-hub/usuarios_imagen.txt (carpeta que
+# ningún volumen tapa) queda la contraseña cifrada, no el texto.
+#
+# El módulo va fuera del PATH y solo root puede modificarlo: lo importan scripts que el
+# admin ejecuta con sudo.
+COPY --chmod=0644 config/usuarios.py /usr/local/lib/usuarios-hub/usuarios.py
+COPY --chmod=0755 config/cargar_usuarios_iniciales.py /usr/local/sbin/cargar_usuarios_iniciales
+COPY --chmod=0755 config/restaurar_usuarios.py /usr/local/sbin/restaurar_usuarios
+COPY --chmod=0755 config/gestionar_usuarios.py /usr/local/sbin/gestionar_usuarios
+COPY --chmod=0755 config/iniciar_hub.sh /usr/local/sbin/iniciar_hub
+RUN --mount=type=bind,source=config/users.txt,target=/tmp/users.txt \
+    /usr/local/sbin/cargar_usuarios_iniciales /tmp/users.txt
+
+############################
+# Configuración del Hub
+#
+COPY config/jupyterhub_config.py /etc/jupyterhub/jupyterhub_config.py
+# Plantillas, colores y logos de la UV (página de inicio de sesión y barra superior).
+COPY config/personalizacion /etc/jupyterhub/personalizacion
+
+# Aquí el Hub guarda su base de datos y su secreto de cookies (volumen en el compose).
+WORKDIR /srv/jupyterhub
+
+EXPOSE 8000
+
+# Al arrancar se sincronizan la BD y las cuentas, y luego JupyterHub queda como PID 1
+# (reemplaza al ENTRYPOINT de Jupyter Lab de la imagen base).
+ENTRYPOINT ["/usr/local/sbin/iniciar_hub"]

@@ -1,0 +1,132 @@
+# Dockerfile para JAPPY base
+# Dependencias:
+#   imagen docker: ubuntu:24.04
+#   archivos     : https://github.com/g-courses/jappy.rc
+#
+# Version 2.0
+
+ARG UBUNTU_VERSION=24.04
+
+FROM ubuntu:${UBUNTU_VERSION}
+
+
+LABEL "mantainer"="Gabriel Astudillo Muñoz (gabriel.astudillo@uv.cl)" 
+LABEL "description"="JAPPY: Educational resource for programming classes in Java, cPP (C++) and Python" 
+LABEL "base version"="3.0-2026-03-18"
+	  
+
+ARG USER=devuser
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/Santiago
+
+
+RUN echo 'APT::Install-Suggests "0";' >> /etc/apt/apt.conf.d/00-docker
+RUN echo 'APT::Install-Recommends "0";' >> /etc/apt/apt.conf.d/00-docker
+
+#RUN apt update && apt -y upgrade
+RUN apt update && apt install --no-install-recommends --yes \
+    sudo    \
+    make g++ cmake  \
+    libboost-all-dev \
+    vim             \
+    nano            \
+    tzdata          \
+    locales         \
+    jq              \
+    bc              \
+    pip             \
+    git             \
+    gnupg           \
+    unzip           \
+    default-jdk	    \
+    curl            \
+    wget            \
+    lsof            \
+    iproute2        \
+    doxygen         \
+    graphviz        \
+    texlive-xetex texlive-fonts-recommended texlive-plain-generic
+
+RUN apt autoremove -y && apt clean && rm -rf /var/lib/apt/lists/*
+     
+RUN locale-gen "en_US.UTF-8"
+
+ENV LANG=en_US.UTF-8 \
+    LANGUAGE=en_US:en \
+    LC_ALL=en_US.UTF-8
+    
+RUN adduser --gecos "" --disabled-password --ingroup www-data ${USER} \
+    && adduser ${USER} sudo \
+    && echo "${USER} ALL=(ALL) NOPASSWD: ALL" >/etc/sudoers.d/${USER} \
+    && chmod 0440 /etc/sudoers.d/${USER}
+
+ARG IMAGE_DIR=https://raw.githubusercontent.com/g-courses/jappy.rc/refs/heads/main/image_dir
+ADD $IMAGE_DIR/etc/pip.conf /etc/pip.conf
+
+USER root
+
+###################
+# Install miniconda
+#
+ARG MINICONDA_INSTALL_SCRIPT=https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+ARG MINICONDA_LOCAL_SCRIPT=/opt/miniconda.sh
+ARG MINICONDA_INSTALL_DIR=/opt/miniconda3
+
+RUN wget ${MINICONDA_INSTALL_SCRIPT} -O ${MINICONDA_LOCAL_SCRIPT} && \
+    chmod +x ${MINICONDA_LOCAL_SCRIPT} && \
+     ${MINICONDA_LOCAL_SCRIPT} -b -p ${MINICONDA_INSTALL_DIR}
+     
+ENV PATH=${MINICONDA_INSTALL_DIR}/bin:$PATH
+
+RUN conda init
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+    
+RUN conda update conda --yes && conda install mamba -n base -c conda-forge --yes 
+
+#############################
+# Jupyther notebook
+#
+RUN conda install -c conda-forge jupyter --yes
+RUN conda install -c conda-forge jupyter_server_ydoc --yes 
+
+RUN echo alias launch_jupyter=\"/opt/miniconda3/bin/jupyter lab --LabApp.check_for_updates_class="jupyterlab.NeverCheckForUpdate" --ip='*' --NotebookApp.token='' --NotebookApp.password='' --allow-root\" > /root/.bash_aliases
+
+#############################
+# Python base libraries
+#
+RUN conda install -c conda-forge matplotlib pandas geojson plotly pympler --yes 
+# Compilador fijado en GCC 14.3.0 (versión de la imagen del profesor).
+# Sin fijar, conda instala la última (GCC 15+), cuyas cabeceras de C++ no puede
+# leer el clang antiguo de cling (kernel C++ / xeus-cling) y el kernel muere con signal 11.
+RUN conda install -c conda-forge cxx-compiler=1.11.0 gcc_impl_linux-64=14.3.0 gcc_linux-64=14.3.0 gxx=14.3.0 gxx_impl_linux-64=14.3.0 gxx_linux-64=14.3.0 --yes
+
+############################
+# Python libraries
+#
+RUN /opt/miniconda3/bin/pip3 install iplantuml
+RUN /opt/miniconda3/bin/pip3 install lap
+RUN conda install --yes imageio
+
+############################
+# Jupyter server port
+#
+EXPOSE 8888
+
+############################
+# Jupyter extensions config
+#
+RUN /opt/miniconda3/bin/jupyter labextension disable "@jupyterlab/apputils-extension:announcements"
+RUN /opt/miniconda3/bin/jupyter labextension disable "@jupyterlab/extensionmanager-extension"
+
+WORKDIR /home/$USER/
+
+ENV PYTHONPATH=/opt/libs/jappy.d/
+ENV JUPYTER_NO_ANNOUNCEMENTS=1
+ENV WORKSPACE=/home/$USER/workspace
+ENV SHELL=/bin/bash
+
+
+
+

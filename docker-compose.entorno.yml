@@ -1,0 +1,21 @@
+services:
+  entorno-programacion:
+    platform: linux/amd64      # Jappy está implementado sobre arquitecturas amd64 o IA64
+    
+    #container_name: dev-jappy # descomentar si se quiere mantener el nombre del contenedor.
+                               # Esto implica que deberá eliminar el contenedor si quiere cambiar
+                               # la carpeta de trabajo.
+                               # Si está comentado, docker asignará un contenedor distinto por cada
+                               # carpeta de trabajo. 
+    
+    image: dantechavez0/entorno-programacion:latest
+    hostname: host-entorno-programacion
+    ports:
+      - 8888:8888
+    volumes:
+      - ./workspace:/home/devuser/workspace
+    networks:
+      - back_net
+
+networks:
+  back_net:

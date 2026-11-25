@@ -1,0 +1,58 @@
+FROM entorno-programacion:kernels
+
+LABEL "update version"="2026-06-16"
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/Santiago
+
+ARG USER=devuser
+ARG IMAGE_DIR=https://raw.githubusercontent.com/g-courses/jappy.rc/refs/heads/main/image_dir
+
+
+USER $USER
+RUN touch /home/$USER/.sudo_as_admin_successful
+
+USER root
+
+############################
+# Update jappy utils modules
+#
+WORKDIR /home/$USER/
+ADD $IMAGE_DIR/opt/libs/jappy.d/jappy_utils.py /opt/libs/jappy.d/jappy_utils.py
+RUN chmod +r /opt/libs/jappy.d/jappy_utils.py
+
+##################################
+# Update python libraries
+#
+RUN conda install scipy
+RUN conda install scikit-learn
+RUN conda install conda-forge::simpy --yes
+RUN conda install conda-forge::altair --yes
+RUN conda install -c conda-forge vega_datasets --yes
+RUN conda install -c conda-forge mystmd --yes
+RUN conda install -c conda-forge texlive-core latexmk imagemagick --yes
+RUN conda install -c conda-forge jupyter-book --yes
+RUN conda install -c conda-forge jupyterlab jupyterlab-myst --yes
+
+#conda update -n base -c defaults conda
+
+
+##################################
+# Update userspace config
+#
+ADD $IMAGE_DIR/root/jupyter.tar /root
+RUN cd /root/ && tar xf jupyter.tar
+
+ADD $IMAGE_DIR/root/configUltralytics.tar /root
+RUN cd /root/ && tar xf configUltralytics.tar
+
+# Los .tar vienen de macOS e incluyen archivos "._*" (metadatos binarios). JupyterLab intenta
+# leer ._default-*.jupyterlab-workspace como UTF-8 y falla con un error 500 en /lab/api/workspaces.
+# SOLO falla c++
+RUN find /root -name '._*' -type f -delete
+
+ENV LD_LIBRARY_PATH=/opt/miniconda3/pkgs/libtiff-4.7.1-h029b1ac_0/lib:$LD_LIBRARY_PATH
+
+# jupyter queda como PID 1.
+ENTRYPOINT ["/opt/miniconda3/bin/jupyter", "lab", "--LabApp.check_for_updates_class=jupyterlab.NeverCheckForUpdate", "--ip=*", "--NotebookApp.token=", "--NotebookApp.password=", "--allow-root"]
+

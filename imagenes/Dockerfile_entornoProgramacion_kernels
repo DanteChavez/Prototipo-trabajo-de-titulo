@@ -1,0 +1,78 @@
+# Dockerfile para JAPPY base
+# Dependencias:
+#   imagen docker: ubuntu:24.04
+#   archivos     : https://github.com/g-courses/jappy.rc
+#
+# Version 2.0
+
+ARG UBUNTU_VERSION=24.04
+
+##########################################
+##########################################
+##
+##   Kernels extras
+##
+##
+FROM entorno-programacion:base
+LABEL "kernel version"="2026-03-18"
+	  
+
+ARG USER=devuser
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/Santiago
+
+ARG IMAGE_DIR=https://raw.githubusercontent.com/g-courses/jappy.rc/refs/heads/main/image_dir
+
+####################
+# Install C++ kernel
+# https://github.com/jupyter-xeus/xeus-cling
+
+RUN conda create -n cling --yes 
+
+RUN /bin/bash -c "source activate cling && conda install xeus-cling notebook -c conda-forge --yes && \
+    jupyter kernelspec install /opt/miniconda3/envs/cling/share/jupyter/kernels/xcpp17"
+
+#RUN  /bin/bash -c " source activate cling && \
+#    mamba install xeus-cling -c conda-forge --yes && \
+#    jupyter kernelspec install /opt/miniconda3/envs/cling/share/jupyter/kernels/xcpp17"
+
+####################
+# Install Java kernel
+#
+ARG JAVA_KERNEL_VERSION=1.0-a7
+ARG JAVA_KERNEL_FILE=1.0a7
+RUN mkdir /opt/java_kernel_install
+RUN wget -P /opt/java_kernel_install/ https://github.com/dflib/jjava/releases/download/${JAVA_KERNEL_VERSION}/jjava-${JAVA_KERNEL_FILE}.tar.gz
+RUN cd /opt/java_kernel_install/ &&  tar xvzf jjava-${JAVA_KERNEL_FILE}.tar.gz 
+RUN /opt/miniconda3/bin/jupyter kernelspec install /opt/java_kernel_install/jjava-${JAVA_KERNEL_FILE}/kernelspec/java --name=java
+RUN sed -i 's/Java (jjava)/Java/' /usr/local/share/jupyter/kernels/java/kernel.json 
+
+############################
+# Java kernels icons
+#
+ADD $IMAGE_DIR/icons/java/logo-32x32.png /usr/local/share/jupyter/kernels/java/logo-32x32.png
+ADD $IMAGE_DIR/icons/java/logo-64x64.png /usr/local/share/jupyter/kernels/java/logo-64x64.png
+
+
+############################
+# Jupyter server port
+#
+EXPOSE 8888
+
+############################
+# Jupyter extensions config
+#
+RUN /opt/miniconda3/bin/jupyter labextension disable "@jupyterlab/apputils-extension:announcements"
+RUN /opt/miniconda3/bin/jupyter labextension disable "@jupyterlab/extensionmanager-extension"
+
+WORKDIR /home/$USER/
+
+ENV PYTHONPATH=/opt/libs/jappy.d/
+ENV JUPYTER_NO_ANNOUNCEMENTS=1
+ENV WORKSPACE=/home/$USER/workspace
+ENV SHELL=/bin/bash
+
+
+
+

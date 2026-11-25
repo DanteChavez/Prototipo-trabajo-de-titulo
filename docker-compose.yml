@@ -1,0 +1,26 @@
+# JupyterHub con usuarios locales de prueba (sin Kubernetes).
+#   docker compose up --build     ->  http://localhost:8000
+services:
+  jupyterhub:
+    platform: linux/amd64      # la imagen del entorno está construida para amd64
+    build:
+      context: .
+      dockerfile: imagenes/Dockerfile_entornoProgramacion_hub
+    image: entorno-programacion:hub
+    hostname: host-jupyterhub
+    ports:
+      - 8000:8000
+    volumes:
+      - homes_estudiantes:/home          # archivos de cada estudiante (/home/<usuario>)
+      - estado_hub:/srv/jupyterhub       # base de datos y secreto de cookies del Hub
+      - usuarios_hub:/var/lib/usuarios-hub  # BD SQLite de usuarios (nombre, UID, rol, contraseña cifrada)
+    networks:
+      - back_net
+
+volumes:
+  homes_estudiantes:
+  estado_hub:
+  usuarios_hub:
+
+networks:
+  back_net:

@@ -1,0 +1,16 @@
+# Usuarios de JupyterHub que se cargan al construir la imagen.
+# Formato: usuario:contraseña[:rol]   rol = estudiante (por omisión), profesor o admin
+# Las líneas con # se ignoran.
+#
+# Agregar una línea y hacer "docker compose up --build" crea ese usuario: al arrancar,
+# los usuarios de este archivo que no están en el volumen usuarios_hub se agregan.
+# Solo suma: cambiar una contraseña o borrar una línea NO afecta a usuarios que ya
+# existen (las contraseñas se cambian con "sudo gestionar_usuarios clave <usuario>").
+# Con el Hub encendido también se puede usar "sudo gestionar_usuarios agregar <archivo>".
+alumno1:1234
+alumno2:1234
+alumno3:1234
+alumno4:1234
+alumno5:1234
+profesor1:1234:profesor
+admin:1234:admin

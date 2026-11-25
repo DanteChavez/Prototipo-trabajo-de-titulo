@@ -1,0 +1,33 @@
+# Etapa anterior (JupyterLab sin Hub)
+workspace/
+copia_homes/
+
+# Documentos y material del informe 
+/latex/
+/claude/
+/Imagenes entrega 2/
+/Imagenes entrega 3/
+/logos/
+/R*brica *.xlsx
+/Trabajo_*.pdf
+/notas*.txt
+/Notas*.txt
+
+# Copias y archivos generados
+config/personalizacion/*.zip
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editores y sistema operativo
+.vscode/
+.idea/
+.DS_Store
+*.bak
+*.tmp
+*.swp
+
+# Archivos temporales de Windows y Office
+~$*
+Thumbs.db
+desktop.ini
