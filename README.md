@@ -34,7 +34,7 @@ Como admin, dentro del contenedor:
 ```
 gestionar_usuarios agregar nuevos.txt      # crea los usuarios del archivo (usuario:contraseña[:rol])
 gestionar_usuarios clave alumno3           # cambia la contraseña
-gestionar_usuarios eliminar alumno3        # elimina al usuario y sus archivos (o un archivo con un usuario por línea)
+gestionar_usuarios eliminar alumno3 | borrar.txr       # elimina al usuario y sus archivos (o un archivo con un usuario por línea)
 gestionar_usuarios listar                  # muestra los usuarios
 ```
 
