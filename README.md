@@ -18,7 +18,6 @@ Luego abrir <http://localhost:8000> e ingresar con una cuenta de `config/users.t
 |---|---|
 | `docker compose up -d` | Levanta el contenedor en segundo plano con la imagen ya construida |
 | `docker compose up -d --build` | Reconstruye la imagen antes de levantarlo. Usarlo la primera vez y después de cambiar un Dockerfile, `config/` o `users.txt` |
-| `docker compose logs -f` | Muestra los mensajes del contenedor (con `-d` no aparecen en la terminal). Se sale con Ctrl+C |
 | `docker compose down` | Detiene y elimina el contenedor. Los usuarios y sus archivos se conservan en los volúmenes |
 | `docker compose down -v` | Además elimina los volúmenes: **borra los archivos y la base de datos de todos los usuarios**. Al volver a levantar, solo quedan los de `users.txt` |
 
@@ -30,37 +29,26 @@ del archivo. Los que ya existen no cambian.
 
 ## Gestionar usuarios
 
-Con el contenedor en funcionamiento, desde la máquina que ejecuta Docker:
+Como admin, dentro del contenedor:
 
 ```
-docker compose exec jupyterhub gestionar_usuarios agregar /tmp/nuevos.txt   # crea los usuarios del archivo
-docker compose exec jupyterhub gestionar_usuarios clave alumno3              # cambia la contraseña
-docker compose exec jupyterhub gestionar_usuarios eliminar alumno3           # elimina al usuario y sus archivos
-docker compose exec jupyterhub gestionar_usuarios eliminar /tmp/bajas.txt    # elimina a los usuarios del archivo
-docker compose exec jupyterhub gestionar_usuarios listar                     # muestra los usuarios
+gestionar_usuarios agregar nuevos.txt      # crea los usuarios del archivo (usuario:contraseña[:rol])
+gestionar_usuarios clave alumno3           # cambia la contraseña
+gestionar_usuarios eliminar alumno3        # elimina al usuario y sus archivos (o un archivo con un usuario por línea)
+gestionar_usuarios listar                  # muestra los usuarios
 ```
 
-Para usar un archivo, primero se copia al contenedor:
+También se puede desde la máquina que ejecuta Docker:
 
 ```
-docker compose cp nuevos.txt jupyterhub:/tmp/nuevos.txt
+docker compose exec jupyterhub gestionar_usuarios <opcion>
 ```
 
-El archivo de `agregar` usa el mismo formato que `users.txt`. El de `eliminar` puede tener solo
-nombres, uno por línea. Los cambios rigen de inmediato, sin reiniciar el Hub.
+Desde la terminal de JupyterLab de la cuenta admin activando los permisos de admin `sudo su` o equivalentes.
 
 ## Pendiente (TODO)
 
-- [ ] **Pasar lo de JAPPY a un repositorio propio.** Hoy los Dockerfiles `base`, `kernels` y
-  `latest` descargan archivos de <https://github.com/g-courses/jappy.rc> durante el build
-  (`ARG IMAGE_DIR=https://raw.githubusercontent.com/g-courses/jappy.rc/...` y
-  `/opt/libs/jappy.d/jappy_utils.py`), y la imagen `hub` parte de
-  `dantechavez0/entorno-programacion:latest`. Si ese repositorio cambia o deja de estar
-  disponible, la imagen no se puede reconstruir igual. Pasos:
-  1. Copiar a este repositorio (o a uno propio) la carpeta `image_dir` que usan los Dockerfiles.
-  2. Cambiar `IMAGE_DIR` para que apunte a la copia propia, o usar `COPY` desde el repositorio.
-  3. Reconstruir la cadena `base` → `kernels` → `latest` y publicar la imagen propia.
-  4. Mantener el crédito a JAPPY y revisar su licencia.
+- [ ] **Pasar lo de JAPPY a un repositorio propio.**
 
 La imagen del entorno de programación deriva de JAPPY, de Gabriel Astudillo Muñoz
 (<https://github.com/g-courses/jappy.rc>).
